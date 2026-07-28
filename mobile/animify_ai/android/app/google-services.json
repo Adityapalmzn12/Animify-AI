@@ -1,0 +1,82 @@
+{
+  "project_info": {
+    "project_number": "247714982724",
+    "project_id": "animify-ai",
+    "storage_bucket": "animify-ai.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:247714982724:android:00d0cea18ebd434750c511",
+        "android_client_info": {
+          "package_name": "ai.animify.animify_ai"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "247714982724-6ms51pb9na054u2f4anab6b9c2ena206.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAlFeQsviSi4E03_vx4vdY0OCjny87XoFA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "247714982724-6ms51pb9na054u2f4anab6b9c2ena206.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "247714982724-5l8fp0v39pjfaluor9pmjudacl3rq4t8.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "ai.animify.animifyAi"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:247714982724:android:83376673e1a741cf50c511",
+        "android_client_info": {
+          "package_name": "com.animify.ai"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "247714982724-6ms51pb9na054u2f4anab6b9c2ena206.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAlFeQsviSi4E03_vx4vdY0OCjny87XoFA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "247714982724-6ms51pb9na054u2f4anab6b9c2ena206.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "247714982724-5l8fp0v39pjfaluor9pmjudacl3rq4t8.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "ai.animify.animifyAi"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

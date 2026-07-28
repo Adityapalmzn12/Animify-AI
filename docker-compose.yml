@@ -1,0 +1,91 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: animify-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-animify}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-animify_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-animify}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-animify}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - animify-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: animify-redis
+    command: redis-server --appendonly yes ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - animify-network
+
+  api:
+    build:
+      context: ./backend/animify-api
+      dockerfile: Dockerfile
+    container_name: animify-api
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-animify}:${POSTGRES_PASSWORD:-animify_secret}@postgres:5432/${POSTGRES_DB:-animify}?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - animify-network
+    volumes:
+      - ./backend/animify-api:/app
+      - /app/node_modules
+
+  worker:
+    build:
+      context: ./backend/animify-api
+      dockerfile: Dockerfile.worker
+    container_name: animify-worker
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-animify}:${POSTGRES_PASSWORD:-animify_secret}@postgres:5432/${POSTGRES_DB:-animify}?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - animify-network
+    deploy:
+      replicas: 2
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  animify-network:
+    driver: bridge

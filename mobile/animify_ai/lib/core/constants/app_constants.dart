@@ -10,6 +10,9 @@ abstract class AppConstants {
   static const List<String> allowedVideoFormats = [
     'mp4',
     'mov',
+    'm4v',
+    'hevc',
+    'heic',
     'avi',
     'webm',
     'mkv',
@@ -18,6 +21,11 @@ abstract class AppConstants {
   static const List<String> allowedVideoMimeTypes = [
     'video/mp4',
     'video/quicktime',
+    'video/x-m4v',
+    'video/hevc',
+    'video/mp4v-es',
+    'image/heic', // some iOS exports label HEVC containers this way
+    'image/heif',
     'video/x-msvideo',
     'video/webm',
     'video/x-matroska',

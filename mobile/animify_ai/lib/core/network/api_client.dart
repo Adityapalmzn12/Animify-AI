@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pretty_dio_logger/pretty_dio_logger.dart';
@@ -7,12 +9,13 @@ import '../errors/exceptions.dart';
 import 'api_interceptors.dart';
 
 final dioProvider = Provider<Dio>((ref) {
+  final config = AppConfig.production();
   final dio = Dio(
     BaseOptions(
-      baseUrl: AppConfig.development().apiBaseUrl,
+      baseUrl: config.apiBaseUrl,
       connectTimeout: const Duration(seconds: 30),
-      receiveTimeout: const Duration(seconds: 30),
-      sendTimeout: const Duration(seconds: 30),
+      receiveTimeout: const Duration(seconds: 60),
+      sendTimeout: const Duration(minutes: 5),
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
@@ -161,6 +164,42 @@ class ApiClient {
         onSendProgress: onSendProgress,
         options: Options(
           headers: {'Content-Type': 'multipart/form-data'},
+        ),
+      );
+    } on DioException catch (e) {
+      throw _handleDioError(e);
+    }
+  }
+
+  /// Upload raw bytes to a signed storage URL (Supabase / S3-compatible).
+  Future<void> putFileToUrl(
+    String url, {
+    required String filePath,
+    required String mimeType,
+    void Function(int, int)? onSendProgress,
+  }) async {
+    try {
+      final file = File(filePath);
+      final length = await file.length();
+      final storageDio = Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 30),
+          receiveTimeout: const Duration(minutes: 5),
+          sendTimeout: const Duration(minutes: 5),
+        ),
+      );
+
+      await storageDio.put(
+        url,
+        data: file.openRead(),
+        onSendProgress: onSendProgress,
+        options: Options(
+          headers: {
+            'Content-Type': mimeType,
+            'Content-Length': length,
+          },
+          validateStatus: (status) =>
+              status != null && status >= 200 && status < 300,
         ),
       );
     } on DioException catch (e) {

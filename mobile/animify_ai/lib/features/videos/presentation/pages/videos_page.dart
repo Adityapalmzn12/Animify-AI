@@ -56,6 +56,9 @@ class _VideosPageState extends ConsumerState<VideosPage> {
                   selectedFilter: _selectedFilter,
                   onFilterChanged: (filter) {
                     setState(() => _selectedFilter = filter);
+                    ref.read(videoJobsProvider.notifier).filterByStatus(
+                          filter == 'all' ? null : filter,
+                        );
                   },
                 ),
               ],

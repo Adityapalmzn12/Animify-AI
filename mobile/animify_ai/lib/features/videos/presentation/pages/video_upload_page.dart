@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../../../core/constants/app_constants.dart';
@@ -26,6 +27,7 @@ class _VideoUploadPageState extends ConsumerState<VideoUploadPage> {
   VideoJobSettings _settings = const VideoJobSettings();
   int _currentStep = 0;
   bool _isPickingFile = false;
+  final _imagePicker = ImagePicker();
 
   @override
   void dispose() {
@@ -35,54 +37,175 @@ class _VideoUploadPageState extends ConsumerState<VideoUploadPage> {
 
   Future<void> _pickVideo() async {
     if (_isPickingFile) return;
-    
-    setState(() {
-      _isPickingFile = true;
-    });
-    
+
+    final source = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Photo Library'),
+              subtitle: const Text('Best for iPhone HEVC / HEIC videos'),
+              onTap: () => Navigator.pop(context, 'gallery'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.videocam_outlined),
+              title: const Text('Record Video'),
+              onTap: () => Navigator.pop(context, 'camera'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.folder_outlined),
+              title: const Text('Browse Files'),
+              subtitle: const Text('MP4, MOV, M4V, HEVC, HEIC'),
+              onTap: () => Navigator.pop(context, 'files'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (source == null || !mounted) return;
+
+    setState(() => _isPickingFile = true);
+
     try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.video,
-        allowMultiple: false,
-      );
-
-    if (result != null && result.files.isNotEmpty) {
-      final file = result.files.first;
-      
-      if (file.size > AppConstants.maxUploadSizeBytes) {
-        _showError('File size exceeds 50MB limit');
-        return;
-      }
-
-      setState(() {
-        _selectedFile = file;
-      });
-
-      if (file.path != null) {
-        _videoController?.dispose();
-        _videoController = VideoPlayerController.file(File(file.path!))
-          ..initialize().then((_) {
-            if (_videoController!.value.duration.inSeconds > AppConstants.maxVideoDurationSeconds) {
-              _showError('Video duration exceeds 3 minutes limit');
-              _selectedFile = null;
-              _videoController?.dispose();
-              _videoController = null;
-            }
-            setState(() {});
-          });
-      }
-    }
-    } catch (e) {
-      if (e.toString().contains('multiple_request')) {
-        // Ignore multiple request error
+      if (source == 'files') {
+        await _pickFromFiles();
       } else {
+        await _pickFromMediaLibrary(
+          source == 'camera' ? ImageSource.camera : ImageSource.gallery,
+        );
+      }
+    } catch (e) {
+      if (!e.toString().contains('multiple_request')) {
         _showError('Failed to pick video: $e');
       }
     } finally {
-      setState(() {
-        _isPickingFile = false;
-      });
+      if (mounted) {
+        setState(() => _isPickingFile = false);
+      }
     }
+  }
+
+  Future<void> _pickFromMediaLibrary(ImageSource source) async {
+    final picked = await _imagePicker.pickVideo(
+      source: source,
+      maxDuration: const Duration(seconds: AppConstants.maxVideoDurationSeconds),
+    );
+    if (picked == null) return;
+
+    final file = File(picked.path);
+    final size = await file.length();
+    final name = picked.name.isNotEmpty
+        ? picked.name
+        : 'video_${DateTime.now().millisecondsSinceEpoch}.mov';
+
+    await _setSelectedVideo(
+      path: picked.path,
+      name: name,
+      size: size,
+    );
+  }
+
+  Future<void> _pickFromFiles() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: AppConstants.allowedVideoFormats,
+      allowMultiple: false,
+      withData: false,
+    );
+
+    if (result == null || result.files.isEmpty) return;
+    final file = result.files.first;
+    if (file.path == null) {
+      _showError('Could not read the selected file');
+      return;
+    }
+
+    await _setSelectedVideo(
+      path: file.path!,
+      name: file.name,
+      size: file.size,
+    );
+  }
+
+  Future<void> _setSelectedVideo({
+    required String path,
+    required String name,
+    required int size,
+  }) async {
+    final ext = name.contains('.')
+        ? name.split('.').last.toLowerCase()
+        : path.split('.').last.toLowerCase();
+
+    if (!AppConstants.allowedVideoFormats.contains(ext) &&
+        ext.isNotEmpty &&
+        ext != 'qt') {
+      // Allow unknown extension when picked from Photos (often path has no useful ext)
+      // but reject clearly unsupported document types.
+      const blocked = {'jpg', 'jpeg', 'png', 'gif', 'pdf', 'doc', 'docx'};
+      if (blocked.contains(ext)) {
+        _showError('Please select a video file (MP4, MOV, HEVC/HEIC)');
+        return;
+      }
+    }
+
+    if (size > AppConstants.maxUploadSizeBytes) {
+      _showError('File size exceeds 50MB limit');
+      return;
+    }
+
+    final platformFile = PlatformFile(
+      name: _normalizeVideoFileName(name, path),
+      path: path,
+      size: size,
+    );
+
+    setState(() => _selectedFile = platformFile);
+
+    _videoController?.dispose();
+    _videoController = VideoPlayerController.file(File(path));
+    try {
+      await _videoController!.initialize();
+      if (_videoController!.value.duration.inSeconds >
+          AppConstants.maxVideoDurationSeconds) {
+        _showError('Video duration exceeds 3 minutes limit');
+        _selectedFile = null;
+        await _videoController?.dispose();
+        _videoController = null;
+      }
+    } catch (e) {
+      // HEVC/HEIC can fail preview on some simulators; still allow upload
+      _showError(
+        'Preview unavailable for this format, but you can still upload it.',
+      );
+    }
+    if (mounted) setState(() {});
+  }
+
+  String _normalizeVideoFileName(String name, String path) {
+    final lower = name.toLowerCase();
+    if (lower.endsWith('.heic') ||
+        lower.endsWith('.heif') ||
+        lower.endsWith('.hevc') ||
+        lower.endsWith('.mov') ||
+        lower.endsWith('.mp4') ||
+        lower.endsWith('.m4v')) {
+      return name;
+    }
+
+    final pathLower = path.toLowerCase();
+    if (pathLower.endsWith('.heic')) return '$name.heic';
+    if (pathLower.endsWith('.heif')) return '$name.heif';
+    if (pathLower.endsWith('.hevc')) return '$name.hevc';
+    if (pathLower.endsWith('.mov')) return '$name.mov';
+    if (pathLower.endsWith('.m4v')) return '$name.m4v';
+    if (pathLower.endsWith('.mp4')) return '$name.mp4';
+
+    // iOS Photos often returns HEVC video without extension — treat as MOV
+    return name.contains('.') ? name : '$name.mov';
   }
 
   void _showError(String message) {
@@ -101,7 +224,6 @@ class _VideoUploadPageState extends ConsumerState<VideoUploadPage> {
           filePath: _selectedFile!.path!,
           fileName: _selectedFile!.name,
           fileSize: _selectedFile!.size,
-          mimeType: 'video/mp4',
         );
   }
 
@@ -117,23 +239,28 @@ class _VideoUploadPageState extends ConsumerState<VideoUploadPage> {
         );
 
     final uploadState = ref.read(videoUploadProvider);
-    
+
     if (uploadState.error != null) {
       _showError(uploadState.error!);
       return;
     }
 
-    // Refresh the videos list
+    final jobId = uploadState.jobId;
     ref.read(videoJobsProvider.notifier).refresh();
+    ref.read(videoUploadProvider.notifier).reset();
 
-    if (mounted) {
-      context.pop();
+    if (!mounted) return;
+
+    if (jobId != null) {
+      context.go('/videos/$jobId');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Video processing started!'),
+          content: Text('Processing started — tracking progress...'),
           backgroundColor: Colors.green,
         ),
       );
+    } else {
+      context.pop();
     }
   }
 
@@ -186,13 +313,37 @@ class _VideoUploadPageState extends ConsumerState<VideoUploadPage> {
               children: [
                 if (_currentStep < 2)
                   Expanded(
-                    child: AppButton(
-                      onPressed: (_currentStep == 0 && _selectedFile == null) ||
-                              uploadState.isUploading
-                          ? null
-                          : details.onStepContinue,
-                      isLoading: uploadState.isUploading,
-                      child: Text(_currentStep == 0 ? 'Upload & Continue' : 'Continue'),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (uploadState.isUploading) ...[
+                          LinearProgressIndicator(
+                            value: uploadState.uploadProgress > 0
+                                ? uploadState.uploadProgress
+                                : null,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Uploading ${(uploadState.uploadProgress * 100).toStringAsFixed(0)}%',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+                        AppButton(
+                          onPressed: (_currentStep == 0 &&
+                                      _selectedFile == null) ||
+                                  uploadState.isUploading
+                              ? null
+                              : details.onStepContinue,
+                          isLoading: uploadState.isUploading,
+                          child: Text(
+                            _currentStep == 0
+                                ? 'Upload & Continue'
+                                : 'Continue',
+                          ),
+                        ),
+                      ],
                     ),
                   )
                 else
@@ -242,23 +393,56 @@ class _VideoUploadPageState extends ConsumerState<VideoUploadPage> {
   }
 
   Widget _buildSelectVideoStep() {
-    if (_selectedFile != null && _videoController?.value.isInitialized == true) {
+    if (_selectedFile != null) {
+      final hasPreview = _videoController?.value.isInitialized == true;
+
       return Column(
         children: [
-          AspectRatio(
-            aspectRatio: _videoController!.value.aspectRatio,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: VideoPlayer(_videoController!),
+          if (hasPreview)
+            AspectRatio(
+              aspectRatio: _videoController!.value.aspectRatio,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: VideoPlayer(_videoController!),
+              ),
+            )
+          else
+            Container(
+              height: 180,
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: Theme.of(context)
+                    .colorScheme
+                    .surfaceContainerHighest
+                    .withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.videocam,
+                    size: 48,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'HEVC / HEIC video ready to upload',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ],
+              ),
             ),
-          ),
           const SizedBox(height: 16),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                _selectedFile!.name,
-                style: Theme.of(context).textTheme.bodyMedium,
+              Expanded(
+                child: Text(
+                  _selectedFile!.name,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
               TextButton(
                 onPressed: _pickVideo,
@@ -314,7 +498,7 @@ class _VideoUploadPageState extends ConsumerState<VideoUploadPage> {
             ),
             const SizedBox(height: 8),
             Text(
-              'MP4, MOV, AVI, WebM up to 50MB\nMax 3 minutes duration',
+              'MP4, MOV, M4V, HEVC/HEIC up to 50MB\nMax 3 minutes duration',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -345,17 +529,17 @@ class _VideoUploadPageState extends ConsumerState<VideoUploadPage> {
           crossAxisSpacing: 12,
           childAspectRatio: 1.2,
           children: [
-            _buildTemplateCard('anime', 'Anime Style', Icons.animation),
-            _buildTemplateCard('cartoon', 'Cartoon', Icons.face),
-            _buildTemplateCard('3d', '3D Animation', Icons.view_in_ar),
-            _buildTemplateCard('artistic', 'Artistic', Icons.brush),
+            _buildTemplateCard('anime', 'Anime Style', Icons.animation, 'Japanese anime look'),
+            _buildTemplateCard('cartoon', 'Cartoon', Icons.face, '2D cartoon animation'),
+            _buildTemplateCard('3d', '3D Animation', Icons.view_in_ar, 'CGI 3D film style'),
+            _buildTemplateCard('artistic', 'Artistic', Icons.brush, 'Painted art style'),
           ],
         ),
       ],
     );
   }
 
-  Widget _buildTemplateCard(String id, String name, IconData icon) {
+  Widget _buildTemplateCard(String id, String name, IconData icon, String subtitle) {
     final isSelected = _selectedTemplateId == id;
     
     return GestureDetector(
@@ -394,6 +578,17 @@ class _VideoUploadPageState extends ConsumerState<VideoUploadPage> {
                         ? Theme.of(context).colorScheme.primary
                         : null,
                   ),
+            ),
+            const SizedBox(height: 2),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Text(
+                subtitle,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
             ),
           ],
         ),

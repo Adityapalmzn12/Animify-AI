@@ -2,6 +2,8 @@ FROM node:20-alpine AS base
 
 WORKDIR /app
 
+RUN apk add --no-cache ffmpeg
+
 FROM base AS deps
 COPY package*.json ./
 RUN npm ci

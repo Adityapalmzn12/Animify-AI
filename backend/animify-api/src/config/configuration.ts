@@ -30,13 +30,24 @@ export default () => ({
   },
   
   storage: {
-    accountId: process.env.R2_ACCOUNT_ID,
-    accessKeyId: process.env.R2_ACCESS_KEY_ID,
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
-    bucketName: process.env.R2_BUCKET_NAME,
-    publicUrl: process.env.R2_PUBLIC_URL,
-    uploadUrlExpiry: parseInt(process.env.R2_UPLOAD_URL_EXPIRY ?? '3600', 10),
-    downloadUrlExpiry: parseInt(process.env.R2_DOWNLOAD_URL_EXPIRY ?? '86400', 10),
+    provider: process.env.STORAGE_PROVIDER || 'supabase',
+    supabaseUrl:
+      process.env.SUPABASE_URL ||
+      'https://gybemqrhlptwmnfugjkm.supabase.co',
+    supabaseAnonKey:
+      process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY,
+    supabaseServiceRoleKey:
+      process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY,
+    jwksUrl: process.env.SUPABASE_JWKS_URL,
+    bucketName: process.env.SUPABASE_STORAGE_BUCKET || 'animify-videos',
+    uploadUrlExpiry: parseInt(
+      process.env.SUPABASE_UPLOAD_URL_EXPIRY ?? '7200',
+      10,
+    ),
+    downloadUrlExpiry: parseInt(
+      process.env.SUPABASE_DOWNLOAD_URL_EXPIRY ?? '86400',
+      10,
+    ),
   },
   
   email: {
@@ -55,10 +66,12 @@ export default () => ({
   },
   
   ai: {
-    provider: process.env.AI_PROVIDER || 'fal',
-    fal: {
-      apiKey: process.env.FAL_API_KEY,
-    },
+    provider: process.env.AI_PROVIDER || 'oss',
+    // Bundled worker on Railway listens on loopback; local default is :8000.
+    workerUrl:
+      process.env.AI_WORKER_URL !== undefined
+        ? process.env.AI_WORKER_URL
+        : 'http://127.0.0.1:8000',
     replicate: {
       apiToken: process.env.REPLICATE_API_TOKEN,
     },

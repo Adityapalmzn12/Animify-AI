@@ -29,7 +29,7 @@ Animify AI is a production-grade AI SaaS platform that converts normal videos in
 │         │                   ▼                   ▼                │
 │         │            ┌──────────────┐    ┌──────────────┐       │
 │         │            │  PostgreSQL  │    │ Cloudflare   │       │
-│         │            │  Database    │    │ R2 Storage   │       │
+│         │            │  Database    │    │ Supabase     │       │
 │         │            └──────────────┘    └──────────────┘       │
 │         │                   │                   │                │
 │         │                   ▼                   ▼                │
@@ -55,7 +55,7 @@ Animify AI is a production-grade AI SaaS platform that converts normal videos in
 - **ORM**: Prisma
 - **Database**: PostgreSQL
 - **Queue**: Redis + BullMQ
-- **Storage**: Cloudflare R2
+- **Storage**: Supabase Storage
 
 ### Video Processing
 - FFmpeg

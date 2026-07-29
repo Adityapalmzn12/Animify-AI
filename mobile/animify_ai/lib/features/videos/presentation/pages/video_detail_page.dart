@@ -1,20 +1,83 @@
+import 'package:chewie/chewie.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:video_player/video_player.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/app_button.dart';
 import '../../domain/entities/video_job_entity.dart';
 import '../providers/videos_provider.dart';
 
-class VideoDetailPage extends ConsumerWidget {
+class VideoDetailPage extends ConsumerStatefulWidget {
   final String videoId;
 
   const VideoDetailPage({super.key, required this.videoId});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final videoAsync = ref.watch(videoJobDetailProvider(videoId));
+  ConsumerState<VideoDetailPage> createState() => _VideoDetailPageState();
+}
+
+class _VideoDetailPageState extends ConsumerState<VideoDetailPage> {
+  VideoPlayerController? _videoController;
+  ChewieController? _chewieController;
+  String? _loadedUrl;
+
+  @override
+  void dispose() {
+    _chewieController?.dispose();
+    _videoController?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _ensurePlayer(String? url) async {
+    if (url == null || url.isEmpty || url == _loadedUrl) return;
+
+    _chewieController?.dispose();
+    await _videoController?.dispose();
+
+    final controller = VideoPlayerController.networkUrl(Uri.parse(url));
+    await controller.initialize();
+
+    if (!mounted) {
+      await controller.dispose();
+      return;
+    }
+
+    setState(() {
+      _videoController = controller;
+      _chewieController = ChewieController(
+        videoPlayerController: controller,
+        autoPlay: false,
+        looping: false,
+        allowFullScreen: true,
+        allowMuting: true,
+        showControls: true,
+        materialProgressColors: ChewieProgressColors(
+          playedColor: AppColors.primary,
+          handleColor: AppColors.primary,
+          backgroundColor: Colors.grey.shade700,
+          bufferedColor: Colors.grey.shade500,
+        ),
+      );
+      _loadedUrl = url;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final videoAsync = ref.watch(videoJobDetailProvider(widget.videoId));
+
+    ref.listen(videoJobDetailProvider(widget.videoId), (previous, next) {
+      next.whenData((video) {
+        if (video != null && video.isCompleted) {
+          final url =
+              video.outputFile?.downloadUrl ?? video.inputFile?.downloadUrl;
+          _ensurePlayer(url);
+        }
+      });
+    });
 
     return Scaffold(
       appBar: AppBar(
@@ -24,7 +87,7 @@ class VideoDetailPage extends ConsumerWidget {
         ),
         title: const Text('Video Details'),
         actions: [
-          PopupMenuButton(
+          PopupMenuButton<String>(
             itemBuilder: (context) => [
               const PopupMenuItem(
                 value: 'share',
@@ -43,9 +106,16 @@ class VideoDetailPage extends ConsumerWidget {
                 ),
               ),
             ],
-            onSelected: (value) {
+            onSelected: (value) async {
               if (value == 'delete') {
-                _showDeleteConfirmation(context);
+                await _confirmDelete(context);
+              } else if (value == 'share') {
+                final video = ref.read(videoJobDetailProvider(widget.videoId)).valueOrNull;
+                final url = video?.outputFile?.downloadUrl ??
+                    video?.inputFile?.downloadUrl;
+                if (url != null) {
+                  await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                }
               }
             },
           ),
@@ -55,6 +125,13 @@ class VideoDetailPage extends ConsumerWidget {
         data: (video) {
           if (video == null) {
             return const Center(child: Text('Video not found'));
+          }
+          if (video.isCompleted && _chewieController == null) {
+            final url =
+                video.outputFile?.downloadUrl ?? video.inputFile?.downloadUrl;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _ensurePlayer(url);
+            });
           }
           return _buildContent(context, video);
         },
@@ -72,7 +149,9 @@ class VideoDetailPage extends ConsumerWidget {
               const Text('Failed to load video details'),
               const SizedBox(height: 8),
               ElevatedButton(
-                onPressed: () => ref.refresh(videoJobDetailProvider(videoId)),
+                onPressed: () => ref
+                    .read(videoJobDetailProvider(widget.videoId).notifier)
+                    .load(),
                 child: const Text('Retry'),
               ),
             ],
@@ -95,7 +174,10 @@ class VideoDetailPage extends ConsumerWidget {
           _buildDetailsSection(context, video),
           const SizedBox(height: 24),
           _buildSettingsSection(context, video),
-          if (video.canDownload) ...[
+          if (video.canDownload ||
+              (video.isCompleted &&
+                  (video.outputFile?.downloadUrl != null ||
+                      video.inputFile?.downloadUrl != null))) ...[
             const SizedBox(height: 24),
             _buildDownloadButton(context, video),
           ],
@@ -105,83 +187,107 @@ class VideoDetailPage extends ConsumerWidget {
   }
 
   Widget _buildVideoPreview(BuildContext context, VideoJobEntity video) {
-    final thumbnailUrl = video.inputFile?.thumbnailUrl ?? 
-                         video.outputFile?.thumbnailUrl;
-
     return AspectRatio(
       aspectRatio: 16 / 9,
       child: Container(
         decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          color: Colors.black,
           borderRadius: BorderRadius.circular(16),
         ),
+        clipBehavior: Clip.antiAlias,
         child: Stack(
           alignment: Alignment.center,
           children: [
-            if (thumbnailUrl != null)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(16),
-                child: Image.network(
-                  thumbnailUrl,
-                  fit: BoxFit.cover,
-                  width: double.infinity,
-                  height: double.infinity,
-                ),
-              )
-            else
-              Icon(
-                Icons.video_file,
-                size: 64,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            if (video.isCompleted)
+            if (video.isCompleted &&
+                _chewieController != null &&
+                _videoController?.value.isInitialized == true)
+              Chewie(controller: _chewieController!)
+            else if (video.isProcessing ||
+                video.status == VideoJobStatus.pending)
               Container(
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.5),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.play_arrow,
-                  color: Colors.white,
-                  size: 32,
-                ),
-              ),
-            if (video.isProcessing)
-              Container(
-                color: Colors.black.withValues(alpha: 0.5),
+                color: Colors.black.withValues(alpha: 0.7),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    CircularProgressIndicator(
-                      value: video.progress / 100,
-                      color: Colors.white,
+                    SizedBox(
+                      width: 64,
+                      height: 64,
+                      child: CircularProgressIndicator(
+                        value: video.progress > 0 ? video.progress / 100 : null,
+                        color: Colors.white,
+                        strokeWidth: 4,
+                      ),
                     ),
                     const SizedBox(height: 16),
                     Text(
                       '${video.progress}%',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                             color: Colors.white,
                             fontWeight: FontWeight.bold,
                           ),
                     ),
-                    if (video.currentStep != null) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        video.currentStep!,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Colors.white.withValues(alpha: 0.8),
-                            ),
-                      ),
-                    ],
+                    const SizedBox(height: 8),
+                    Text(
+                      video.currentStep ?? _statusLabel(video.status),
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: Colors.white.withValues(alpha: 0.85),
+                          ),
+                    ),
                   ],
                 ),
-              ),
+              )
+            else if (video.isFailed)
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.error_outline, color: Colors.red, size: 48),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Processing failed',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'See error details below',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.7),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else
+              const Icon(Icons.video_file, size: 64, color: Colors.white54),
           ],
         ),
       ),
     );
+  }
+
+  String _statusLabel(VideoJobStatus status) {
+    switch (status) {
+      case VideoJobStatus.pending:
+        return 'Pending';
+      case VideoJobStatus.queued:
+        return 'In queue';
+      case VideoJobStatus.processing:
+        return 'Processing';
+      case VideoJobStatus.completed:
+        return 'Completed';
+      case VideoJobStatus.failed:
+        return 'Failed';
+      case VideoJobStatus.cancelled:
+        return 'Cancelled';
+    }
   }
 
   Widget _buildStatusSection(BuildContext context, VideoJobEntity video) {
@@ -244,16 +350,43 @@ class VideoDetailPage extends ConsumerWidget {
                         fontWeight: FontWeight.w600,
                       ),
                 ),
-                if (video.errorMessage != null)
+                if (video.currentStep != null)
                   Text(
-                    video.errorMessage!,
+                    video.currentStep!,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: statusColor,
                         ),
                   ),
+                if (video.errorMessage != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: SelectableText(
+                      video.errorMessage!,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: statusColor,
+                          ),
+                    ),
+                  ),
+                if (video.isProcessing || video.status == VideoJobStatus.pending)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: LinearProgressIndicator(
+                      value: video.progress > 0 ? video.progress / 100 : null,
+                      color: statusColor,
+                      backgroundColor: statusColor.withValues(alpha: 0.2),
+                    ),
+                  ),
               ],
             ),
           ),
+          if (video.isProcessing || video.status == VideoJobStatus.pending)
+            Text(
+              '${video.progress}%',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: statusColor,
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
         ],
       ),
     );
@@ -270,7 +403,11 @@ class VideoDetailPage extends ConsumerWidget {
               ),
         ),
         const SizedBox(height: 12),
-        _buildDetailRow(context, 'File Name', video.inputFile?.originalName ?? '-'),
+        _buildDetailRow(
+          context,
+          'File Name',
+          video.inputFile?.originalName ?? '-',
+        ),
         _buildDetailRow(
           context,
           'Duration',
@@ -279,11 +416,7 @@ class VideoDetailPage extends ConsumerWidget {
               : '-',
         ),
         _buildDetailRow(context, 'Template', video.template?.name ?? 'Default'),
-        _buildDetailRow(
-          context,
-          'Created',
-          _formatDateTime(video.createdAt),
-        ),
+        _buildDetailRow(context, 'Created', _formatDateTime(video.createdAt)),
         if (video.completedAt != null)
           _buildDetailRow(
             context,
@@ -306,11 +439,14 @@ class VideoDetailPage extends ConsumerWidget {
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
           ),
-          Text(
-            value,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w500,
-                ),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w500,
+                  ),
+            ),
           ),
         ],
       ),
@@ -340,7 +476,10 @@ class VideoDetailPage extends ConsumerWidget {
               _buildSettingChip(context, 'Audio Enhancement'),
             if (video.settings.generateSubtitles)
               _buildSettingChip(context, 'Subtitles'),
-            _buildSettingChip(context, video.settings.outputQuality.toUpperCase()),
+            _buildSettingChip(
+              context,
+              video.settings.outputQuality.toUpperCase(),
+            ),
           ],
         ),
       ],
@@ -361,7 +500,22 @@ class VideoDetailPage extends ConsumerWidget {
 
   Widget _buildDownloadButton(BuildContext context, VideoJobEntity video) {
     return AppButton.gradient(
-      onPressed: () {
+      onPressed: () async {
+        final url =
+            video.outputFile?.downloadUrl ?? video.inputFile?.downloadUrl;
+        if (url == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Download URL not available')),
+          );
+          return;
+        }
+        final uri = Uri.parse(url);
+        final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+        if (!ok && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not open download link')),
+          );
+        }
       },
       child: const Row(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -378,27 +532,42 @@ class VideoDetailPage extends ConsumerWidget {
     return '${dateTime.day}/${dateTime.month}/${dateTime.year} ${dateTime.hour}:${dateTime.minute.toString().padLeft(2, '0')}';
   }
 
-  void _showDeleteConfirmation(BuildContext context) {
-    showDialog(
+  Future<void> _confirmDelete(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete Video'),
-        content: const Text('Are you sure you want to delete this video? This action cannot be undone.'),
+        content: const Text(
+          'Are you sure you want to delete this video? This action cannot be undone.',
+        ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(context, false),
             child: const Text('Cancel'),
           ),
           TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              context.pop();
-            },
+            onPressed: () => Navigator.pop(context, true),
             style: TextButton.styleFrom(foregroundColor: Colors.red),
             child: const Text('Delete'),
           ),
         ],
       ),
     );
+
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await ref
+          .read(videoJobDetailProvider(widget.videoId).notifier)
+          .delete();
+      await ref.read(videoJobsProvider.notifier).refresh();
+      if (!mounted) return;
+      context.pop();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Delete failed: $e')),
+      );
+    }
   }
 }

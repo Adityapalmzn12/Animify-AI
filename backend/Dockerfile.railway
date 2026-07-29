@@ -1,0 +1,60 @@
+# Combined NestJS API + OSS AI worker (FastAPI + Celery) for Railway free tier.
+# One service runs everything — no extra Railway services required.
+
+FROM node:20-bookworm-slim AS deps
+WORKDIR /app/api
+COPY animify-api/package*.json ./
+RUN npm ci
+
+FROM node:20-bookworm-slim AS builder
+WORKDIR /app/api
+COPY --from=deps /app/api/node_modules ./node_modules
+COPY animify-api/ ./
+ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
+ENV PRISMA_CLI_BINARY_TARGETS="debian-openssl-3.0.x"
+RUN npx prisma generate && npm run build && npm prune --omit=dev
+
+FROM node:20-bookworm-slim AS runner
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    python3 \
+    python3-pip \
+    python3-venv \
+    wget \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# NestJS API
+COPY --from=builder /app/api/dist /app/api/dist
+COPY --from=builder /app/api/node_modules /app/api/node_modules
+COPY --from=builder /app/api/package*.json /app/api/
+COPY --from=builder /app/api/prisma /app/api/prisma
+
+# OSS AI worker (lean deps — FFmpeg CPU path; MediaPipe optional)
+COPY ai-worker/requirements-lean.txt /app/ai-worker/requirements-lean.txt
+RUN python3 -m venv /app/ai-worker/.venv \
+    && /app/ai-worker/.venv/bin/pip install --no-cache-dir -U pip \
+    && /app/ai-worker/.venv/bin/pip install --no-cache-dir -r /app/ai-worker/requirements-lean.txt
+
+COPY ai-worker/app /app/ai-worker/app
+COPY ai-worker/workflows /app/ai-worker/workflows
+
+COPY start-prod.sh /app/start-prod.sh
+RUN chmod +x /app/start-prod.sh \
+    && ln -sf /app/ai-worker/.venv/bin/uvicorn /usr/local/bin/uvicorn \
+    && ln -sf /app/ai-worker/.venv/bin/celery /usr/local/bin/celery
+
+ENV NODE_ENV=production \
+    PORT=3000 \
+    AI_PROVIDER=oss \
+    AI_WORKER_URL=http://127.0.0.1:8000 \
+    PREFER_GPU=false \
+    WORK_DIR=/tmp/animify-worker \
+    PYTHONPATH=/app/ai-worker \
+    PYTHONUNBUFFERED=1
+
+EXPOSE 3000
+
+CMD ["/app/start-prod.sh"]

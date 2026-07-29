@@ -71,3 +71,5 @@ temp/
 *.key
 credentials.json
 service-account.json
+firebase-service-account.json
+*-firebase-adminsdk-*.json

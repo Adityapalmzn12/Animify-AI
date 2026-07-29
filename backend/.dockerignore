@@ -1,0 +1,14 @@
+**/node_modules
+**/dist
+**/.venv
+**/__pycache__
+**/.git
+**/.env
+**/*.md
+animify-api/.env
+ai-worker/.env
+ai-worker/.venv
+**/coverage
+**/.turbo
+**/build
+mobile

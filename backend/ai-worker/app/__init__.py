@@ -1,0 +1,1 @@
+"""Animify OSS AI video worker."""

@@ -36,9 +36,13 @@ class VideoJobEntity with _$VideoJobEntity {
 
   bool get isCompleted => status == VideoJobStatus.completed;
   bool get isFailed => status == VideoJobStatus.failed;
-  bool get isProcessing => status == VideoJobStatus.processing || 
-                           status == VideoJobStatus.queued;
-  bool get canDownload => isCompleted && outputFile?.downloadUrl != null;
+  bool get isProcessing =>
+      status == VideoJobStatus.processing ||
+      status == VideoJobStatus.queued ||
+      status == VideoJobStatus.pending;
+  bool get canDownload =>
+      isCompleted &&
+      (outputFile?.downloadUrl != null || inputFile?.downloadUrl != null);
 }
 
 @freezed

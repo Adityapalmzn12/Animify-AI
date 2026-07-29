@@ -73,12 +73,12 @@ class AppConfig {
 
   factory AppConfig.production() {
     return const AppConfig(
-      apiBaseUrl: 'https://api.animify.ai/api/v1',
-      wsBaseUrl: 'wss://api.animify.ai',
+      apiBaseUrl: 'https://zoological-commitment-production-2ef6.up.railway.app/api/v1',
+      wsBaseUrl: 'wss://zoological-commitment-production-2ef6.up.railway.app',
       googleClientId: '',
       razorpayKeyId: 'rzp_live_',
       environment: Environment.production,
-      enableLogging: false,
+      enableLogging: true,
       enableCrashlytics: true,
     );
   }

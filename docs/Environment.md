@@ -51,17 +51,18 @@ OTP_EXPIRY_MINUTES=5
 OTP_MAX_ATTEMPTS=3
 
 # =============================================================================
-# STORAGE (Cloudflare R2)
+# STORAGE (Supabase Storage - free tier)
 # =============================================================================
-R2_ACCOUNT_ID=your-cloudflare-account-id
-R2_ACCESS_KEY_ID=your-r2-access-key-id
-R2_SECRET_ACCESS_KEY=your-r2-secret-access-key
-R2_BUCKET_NAME=animify-storage
-R2_PUBLIC_URL=https://your-r2-public-url.r2.dev
+STORAGE_PROVIDER=supabase
+SUPABASE_URL=https://gybemqrhlptwmnfugjkm.supabase.co
+SUPABASE_PUBLISHABLE_KEY=sb_publishable_xxxxx
+SUPABASE_SECRET_KEY=sb_secret_xxxxx
+SUPABASE_JWKS_URL=https://gybemqrhlptwmnfugjkm.supabase.co/auth/v1/.well-known/jwks.json
+SUPABASE_STORAGE_BUCKET=animify-videos
 
 # Signed URL Expiry (seconds)
-R2_UPLOAD_URL_EXPIRY=3600
-R2_DOWNLOAD_URL_EXPIRY=86400
+SUPABASE_UPLOAD_URL_EXPIRY=7200
+SUPABASE_DOWNLOAD_URL_EXPIRY=86400
 
 # =============================================================================
 # EMAIL
@@ -89,22 +90,15 @@ RAZORPAY_WEBHOOK_SECRET=your-webhook-secret
 # STRIPE_PUBLISHABLE_KEY=pk_test_your-publishable-key
 
 # =============================================================================
-# AI PROVIDERS
+# AI (OPEN SOURCE WORKER)
 # =============================================================================
-# Primary AI Provider
-AI_PROVIDER=fal
+# oss = self-hosted FastAPI + Celery worker (no paid cloud AI)
+AI_PROVIDER=oss
+AI_WORKER_URL=http://localhost:8000
 
-# Fal AI
-FAL_API_KEY=your-fal-api-key
-
-# Replicate
-REPLICATE_API_TOKEN=your-replicate-token
-
-# Runway
-RUNWAY_API_KEY=your-runway-api-key
-
-# OpenAI (for Whisper transcription)
-OPENAI_API_KEY=sk-your-openai-api-key
+# Optional legacy / unused
+REPLICATE_API_TOKEN=
+OPENAI_API_KEY=
 
 # =============================================================================
 # VIDEO PROCESSING

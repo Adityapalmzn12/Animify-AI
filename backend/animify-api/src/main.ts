@@ -42,7 +42,13 @@ async function bootstrap() {
   SwaggerModule.setup('api/docs', app, document);
   logger.log('Swagger documentation available at /api/docs');
 
-  const port = process.env.PORT || configService.get<number>('port') || 3000;
+  // Prefer API_PORT; ignore Redis PORT=6379 if it leaked into the service env.
+  const rawPort = process.env.API_PORT || process.env.PORT;
+  const portNum = Number(rawPort);
+  const port =
+    Number.isFinite(portNum) && portNum > 0 && portNum !== 6379
+      ? portNum
+      : configService.get<number>('port') || 3000;
   await app.listen(port);
   
   logger.log(`Application running on port ${port}`);

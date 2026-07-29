@@ -48,6 +48,12 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      AI_PROVIDER: oss
+      AI_WORKER_URL: http://ai-worker:8000
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:-}
+      SUPABASE_STORAGE_BUCKET: ${SUPABASE_STORAGE_BUCKET:-animify-videos}
     ports:
       - "3000:3000"
     depends_on:
@@ -61,6 +67,7 @@ services:
       - ./backend/animify-api:/app
       - /app/node_modules
 
+  # Legacy NestJS bull worker (kept for non-AI jobs if needed)
   worker:
     build:
       context: ./backend/animify-api
@@ -79,12 +86,86 @@ services:
         condition: service_healthy
     networks:
       - animify-network
+    profiles: ["full"]
+
+  ai-worker:
+    build:
+      context: ./backend/ai-worker
+      dockerfile: Dockerfile
+    container_name: animify-ai-worker
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CELERY_QUEUE: animify.video.process
+      WORK_DIR: /tmp/animify-worker
+      COMFYUI_URL: http://comfyui:8188
+      PREFER_GPU: ${PREFER_GPU:-true}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:-}
+      SUPABASE_STORAGE_BUCKET: ${SUPABASE_STORAGE_BUCKET:-animify-videos}
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - animify-network
+    profiles: ["cpu", "gpu", "full"]
+
+  celery-worker:
+    build:
+      context: ./backend/ai-worker
+      dockerfile: Dockerfile
+    container_name: animify-celery-worker
+    command: >
+      celery -A app.tasks.celery_app worker
+      --loglevel=INFO
+      --queues=animify.video.process
+      --concurrency=1
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CELERY_QUEUE: animify.video.process
+      WORK_DIR: /tmp/animify-worker
+      COMFYUI_URL: http://comfyui:8188
+      PREFER_GPU: ${PREFER_GPU:-true}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:-}
+      SUPABASE_STORAGE_BUCKET: ${SUPABASE_STORAGE_BUCKET:-animify-videos}
+    depends_on:
+      redis:
+        condition: service_healthy
+      ai-worker:
+        condition: service_started
+    networks:
+      - animify-network
+    profiles: ["cpu", "gpu", "full"]
+
+  comfyui:
+    image: yanwk/comfyui-boot:cu124-slim
+    container_name: animify-comfyui
+    ports:
+      - "8188:8188"
+    environment:
+      CLI_ARGS: "--listen 0.0.0.0 --port 8188"
+    volumes:
+      - comfyui_models:/root/ComfyUI/models
+      - comfyui_output:/root/ComfyUI/output
+      - ./backend/ai-worker/workflows:/root/ComfyUI/user/default/workflows:ro
+    networks:
+      - animify-network
     deploy:
-      replicas: 2
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    profiles: ["gpu", "full"]
 
 volumes:
   postgres_data:
   redis_data:
+  comfyui_models:
+  comfyui_output:
 
 networks:
   animify-network:

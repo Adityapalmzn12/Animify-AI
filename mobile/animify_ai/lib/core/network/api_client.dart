@@ -7,14 +7,21 @@ import 'package:pretty_dio_logger/pretty_dio_logger.dart';
 import '../config/env_config.dart';
 import '../errors/exceptions.dart';
 import 'api_interceptors.dart';
+import 'media_upload_service.dart';
+
+final appConfigProvider = Provider<AppConfig>((ref) {
+  // Always hit production Railway so Generate/Studio/AI work without a local API.
+  // Switch to AppConfig.development() only when debugging against a local Nest server.
+  return AppConfig.production();
+});
 
 final dioProvider = Provider<Dio>((ref) {
-  final config = AppConfig.production();
+  final config = ref.watch(appConfigProvider);
   final dio = Dio(
     BaseOptions(
       baseUrl: config.apiBaseUrl,
       connectTimeout: const Duration(seconds: 30),
-      receiveTimeout: const Duration(seconds: 60),
+      receiveTimeout: const Duration(seconds: 120),
       sendTimeout: const Duration(minutes: 5),
       headers: {
         'Content-Type': 'application/json',
@@ -26,14 +33,15 @@ final dioProvider = Provider<Dio>((ref) {
   dio.interceptors.addAll([
     AuthInterceptor(ref),
     ErrorInterceptor(),
-    PrettyDioLogger(
-      requestHeader: true,
-      requestBody: true,
-      responseBody: true,
-      responseHeader: false,
-      error: true,
-      compact: true,
-    ),
+    if (config.enableLogging)
+      PrettyDioLogger(
+        requestHeader: false,
+        requestBody: true,
+        responseBody: true,
+        responseHeader: false,
+        error: true,
+        compact: true,
+      ),
   ]);
 
   return dio;
@@ -41,6 +49,10 @@ final dioProvider = Provider<Dio>((ref) {
 
 final apiClientProvider = Provider<ApiClient>((ref) {
   return ApiClient(ref.watch(dioProvider));
+});
+
+final mediaUploadServiceProvider = Provider<MediaUploadService>((ref) {
+  return MediaUploadService(ref.watch(apiClientProvider));
 });
 
 class ApiClient {
@@ -310,23 +322,37 @@ class ApiResponse<T> {
     Response response,
     T Function(dynamic json)? fromJson,
   ) {
-    final json = response.data as Map<String, dynamic>;
-    
-    T? data;
-    if (fromJson != null && json['data'] != null) {
-      data = fromJson(json['data']);
-    } else if (json['data'] != null) {
-      data = json['data'] as T?;
+    final raw = response.data;
+    if (raw is! Map<String, dynamic>) {
+      return ApiResponse(success: true, data: raw as T?);
     }
+    final json = raw;
+
+    dynamic payload = json['data'];
+    // Some list endpoints accidentally nest as { data: { data: [...], ... } }
+    if (payload is Map && payload['data'] is List && T == List<dynamic>) {
+      payload = payload['data'];
+    }
+
+    T? data;
+    if (fromJson != null && payload != null) {
+      data = fromJson(payload);
+    } else if (payload != null) {
+      data = payload as T?;
+    }
+
+    final paginationJson = json['pagination'] ??
+        (payload is Map ? payload['pagination'] : null) ??
+        (payload is Map ? payload['meta'] : null);
 
     return ApiResponse(
       success: json['success'] ?? true,
       data: data,
-      meta: json['meta'] != null 
-          ? ApiMeta.fromJson(json['meta']) 
+      meta: json['meta'] is Map<String, dynamic>
+          ? ApiMeta.fromJson(json['meta'] as Map<String, dynamic>)
           : null,
-      pagination: json['pagination'] != null 
-          ? ApiPagination.fromJson(json['pagination']) 
+      pagination: paginationJson is Map<String, dynamic>
+          ? ApiPagination.fromJson(paginationJson)
           : null,
     );
   }

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/network/api_client.dart';
+import '../../../../core/router/app_router.dart';
 import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/app_text_field.dart';
 
@@ -35,7 +36,7 @@ class _TextToVideoPageState extends ConsumerState<TextToVideoPage> {
     setState(() => _isSubmitting = true);
     try {
       final apiClient = ref.read(apiClientProvider);
-      await apiClient.post<Map<String, dynamic>>(
+      final res = await apiClient.post<Map<String, dynamic>>(
         '/generator',
         data: {
           'jobType': 'TEXT_TO_VIDEO',
@@ -46,10 +47,15 @@ class _TextToVideoPageState extends ConsumerState<TextToVideoPage> {
       );
 
       if (mounted) {
+        final jobId = res.data?['id'] as String?;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Video generation started')),
         );
-        context.pop();
+        if (jobId != null) {
+          context.go('/videos/$jobId');
+        } else {
+          context.go(AppRoutes.videos);
+        }
       }
     } catch (e) {
       if (mounted) {

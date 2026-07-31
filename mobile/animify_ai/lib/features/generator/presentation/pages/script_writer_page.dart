@@ -42,10 +42,15 @@ class _ScriptWriterPageState extends ConsumerState<ScriptWriterPage> {
         },
       );
       final data = res.data ?? {};
+      final nested = data['job'] is Map
+          ? (data['job'] as Map)['settings']
+          : data['settings'];
+      final fromSettings = nested is Map ? nested['scriptText'] as String? : null;
       setState(() {
         _script = data['scriptText'] as String? ??
+            fromSettings ??
             data['script'] as String? ??
-            data.toString();
+            'Script generated.';
       });
     } catch (e) {
       if (mounted) {

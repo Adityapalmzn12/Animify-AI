@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/network/api_client.dart';
+import '../../../../core/router/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/app_text_field.dart';
@@ -134,20 +136,34 @@ class _CreativeStudioPageState extends ConsumerState<CreativeStudioPage> {
 
       final data = res.data ?? {};
       final url = data['resultUrl'] as String? ??
-          data['imageJob']?['resultUrl'] as String?;
+          (data['imageJob'] is Map
+              ? (data['imageJob'] as Map)['resultUrl'] as String?
+              : null);
+      final jobId = data['id'] as String? ??
+          (data['videoJob'] is Map
+              ? (data['videoJob'] as Map)['id'] as String?
+              : null);
 
       setState(() => _resultUrl = url);
 
       if (mounted) {
+        final isVideo = _selectedMode == 'prompt_to_video' ||
+            _selectedMode == 'story_reel' ||
+            _animate;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               url != null
                   ? 'Created successfully'
-                  : 'Job started — check Videos for progress',
+                  : 'Job started — opening Videos…',
             ),
           ),
         );
+        if (isVideo && jobId != null) {
+          context.go('/videos/$jobId');
+        } else if (isVideo) {
+          context.go(AppRoutes.videos);
+        }
       }
     } catch (e) {
       setState(() => _error = e.toString());

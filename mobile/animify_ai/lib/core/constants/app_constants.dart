@@ -91,12 +91,18 @@ abstract class ApiEndpoints {
   static const String projectsList = projects;
   static const String creditsBalance = '$credits/balance';
   static const String creditsLedger = '$credits/ledger';
-  static const String creditsPromo = '$credits/promo';
+  static const String paymentsPromo = '$payments/promo';
   static const String generatorJobs = generator;
+  static const String studio = '/studio';
+  static const String studioModes = '$studio/modes';
+  static const String studioGenerate = '$studio/generate';
+  static const String imagesGenerate = '/images/generate';
+  static const String scriptsGenerate = '/scripts/generate';
   static const String adminMetrics = '$admin/metrics';
   
   static const String videoUploadUrl = '$videos/upload-url';
-  static const String videoJobs = '$videos/jobs';
+  static const String videoConfirmUpload = '$videos/confirm-upload';
+  static const String videoJobs = videos;
   
   static const String templateCategories = '$templates/categories';
   

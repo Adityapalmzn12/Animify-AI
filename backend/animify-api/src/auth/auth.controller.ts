@@ -15,6 +15,7 @@ import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { AppleAuthDto } from './dto/apple-auth.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -59,6 +60,17 @@ export class AuthController {
   @ApiOperation({ summary: 'Reset password after OTP verification' })
   async resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto);
+  }
+
+  @Public()
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Send password-reset OTP (alias of send-otp)' })
+  async forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.sendOtp({
+      email: dto.email,
+      purpose: 'password_reset',
+    });
   }
 
   @Public()

@@ -15,7 +15,6 @@ class DashboardPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(currentUserProvider);
-    final theme = Theme.of(context);
 
     return Scaffold(
       body: SafeArea(
@@ -27,7 +26,11 @@ class DashboardPage extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildHeader(context, user?.name ?? 'User'),
+                    _buildHeader(
+                      context,
+                      user?.name ?? 'User',
+                      user?.creditBalance ?? 0,
+                    ),
                     const SizedBox(height: 24),
                     const UsageCard(),
                     const SizedBox(height: 24),
@@ -44,11 +47,15 @@ class DashboardPage extends ConsumerWidget {
     );
   }
 
-  Widget _buildHeader(BuildContext context, String userName) {
+  Widget _buildHeader(
+    BuildContext context,
+    String userName,
+    int creditBalance,
+  ) {
     final firstName = userName.split(' ').first;
     final hour = DateTime.now().hour;
     String greeting;
-    
+
     if (hour < 12) {
       greeting = 'Good morning';
     } else if (hour < 17) {
@@ -73,6 +80,14 @@ class DashboardPage extends ConsumerWidget {
               firstName,
               style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                     fontWeight: FontWeight.bold,
+                  ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '$creditBalance credits',
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: Theme.of(context).colorScheme.primary,
+                    fontWeight: FontWeight.w600,
                   ),
             ),
           ],
@@ -125,19 +140,41 @@ class DashboardPage extends ConsumerWidget {
           children: [
             Expanded(
               child: QuickActionCard(
-                icon: Icons.add_circle_outline,
-                label: 'New Video',
+                icon: Icons.auto_awesome,
+                label: 'AI Studio',
                 gradient: AppColors.primaryGradient,
-                onTap: () => context.push(AppRoutes.videoUpload),
+                onTap: () => context.go(AppRoutes.generator),
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: QuickActionCard(
-                icon: Icons.style_outlined,
-                label: 'Templates',
+                icon: Icons.movie_creation_outlined,
+                label: 'Prompt→Video',
                 gradient: AppColors.accentGradient,
-                onTap: () => context.go(AppRoutes.templates),
+                onTap: () => context.push(AppRoutes.generatorTextToVideo),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: QuickActionCard(
+                icon: Icons.brush_outlined,
+                label: 'Ghibli Art',
+                gradient: AppColors.primaryGradient,
+                onTap: () => context.push('${AppRoutes.imageGen}?style=ghibli'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: QuickActionCard(
+                icon: Icons.account_balance_wallet_outlined,
+                label: 'Wallet',
+                gradient: AppColors.accentGradient,
+                onTap: () => context.push(AppRoutes.wallet),
               ),
             ),
           ],

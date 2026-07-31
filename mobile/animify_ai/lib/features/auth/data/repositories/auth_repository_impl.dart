@@ -193,16 +193,18 @@ class AuthRepositoryImpl implements AuthRepository {
       );
       
       final newAccessToken = response['accessToken'] as String;
-      final expiresIn = response['expiresIn'] as int;
-      
+      final newRefreshToken =
+          (response['refreshToken'] as String?) ?? refreshToken;
+      final expiresIn = (response['expiresIn'] as num?)?.toInt() ?? 900;
+
       await _localDataSource.cacheTokens(
         accessToken: newAccessToken,
-        refreshToken: refreshToken,
+        refreshToken: newRefreshToken,
       );
-      
+
       return Right(AuthTokens(
         accessToken: newAccessToken,
-        refreshToken: refreshToken,
+        refreshToken: newRefreshToken,
         expiresIn: expiresIn,
       ));
     } on NetworkException catch (e) {

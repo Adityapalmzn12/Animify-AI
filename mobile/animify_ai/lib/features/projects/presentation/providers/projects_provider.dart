@@ -19,12 +19,15 @@ class ProjectItem {
 
   factory ProjectItem.fromJson(Map<String, dynamic> json) {
     final counts = json['_count'] as Map<String, dynamic>?;
+    final updated = json['updatedAt'] ?? json['createdAt'];
     return ProjectItem(
       id: json['id'] as String,
-      name: json['name'] as String,
+      name: json['name'] as String? ?? 'Untitled',
       description: json['description'] as String?,
       jobCount: (counts?['jobs'] as num?)?.toInt() ?? 0,
-      updatedAt: DateTime.parse(json['updatedAt'] as String),
+      updatedAt: updated != null
+          ? DateTime.parse(updated as String)
+          : DateTime.now(),
     );
   }
 }

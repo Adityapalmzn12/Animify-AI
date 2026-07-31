@@ -62,7 +62,25 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
       ApiEndpoints.verifyOtp,
       data: request.toJson(),
     );
-    return AuthResponse.fromJson(response.data!);
+    final data = response.data ?? {};
+
+    // Password-reset OTP only verifies; tokens are not issued.
+    if (request.purpose == 'password_reset' || data['verified'] == true) {
+      return AuthResponse(
+        accessToken: '',
+        refreshToken: '',
+        expiresIn: 0,
+        user: UserModel(
+          id: 'pending',
+          email: request.email,
+          name: request.email.split('@').first,
+          emailVerified: true,
+          createdAt: DateTime.now(),
+        ),
+      );
+    }
+
+    return AuthResponse.fromJson(data);
   }
 
   @override

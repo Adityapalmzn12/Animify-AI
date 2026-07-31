@@ -102,13 +102,19 @@ export class VideosService {
       duration: dto.settings?.duration || 5,
     };
 
-    const creditsCost = this.creditCostFor(jobType);
-    await this.creditsService.debitCredits(
-      userId,
-      creditsCost,
-      undefined,
-      `${jobType} job`,
-    );
+    const prepaid =
+      dto.skipCreditDebit === true ||
+      settings.creditsPrepaid === true ||
+      (dto.settings as any)?.creditsPrepaid === true;
+    const creditsCost = prepaid ? 0 : this.creditCostFor(jobType);
+    if (!prepaid) {
+      await this.creditsService.debitCredits(
+        userId,
+        creditsCost,
+        undefined,
+        `${jobType} job`,
+      );
+    }
 
     const provider = this.configService.get<string>('ai.provider') || 'oss';
 
@@ -122,7 +128,9 @@ export class VideosService {
           prompt: dto.prompt || null,
           jobType,
           provider,
-          creditsCost,
+          creditsCost: prepaid
+            ? this.creditCostFor(jobType)
+            : creditsCost,
           status: 'PENDING',
           progress: 0,
           currentStep: `Queued — ${profile.name}`,

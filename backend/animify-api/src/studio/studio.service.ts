@@ -35,14 +35,34 @@ export class StudioService {
 
   async create(userId: string, dto: CreateStudioDto) {
     const mode = dto.mode;
-    const cost = this.costFor(mode);
-    await this.credits.debitCredits(userId, cost, undefined, `Studio ${mode}`);
+    // Auto-top-up for empty wallets so launch users can generate immediately
+    await this.ensureLaunchCredits(userId);
+
+    const imageCost = this.costFor(mode);
+    const willAnimate =
+      !!dto.animate &&
+      mode !== CreativeMode.PROMPT_TO_VIDEO &&
+      mode !== CreativeMode.STORY_REEL;
+    const animateCost = willAnimate
+      ? this.config.get<number>('credits.imageToVideoCost') ?? 15
+      : 0;
+    const totalCost =
+      mode === CreativeMode.PROMPT_TO_VIDEO || mode === CreativeMode.STORY_REEL
+        ? imageCost
+        : imageCost + animateCost;
+
+    await this.credits.debitCredits(
+      userId,
+      totalCost,
+      undefined,
+      `Studio ${mode}${willAnimate ? '+animate' : ''}`,
+    );
 
     const enhanced = this.buildPrompt(mode, dto);
 
     try {
       if (mode === CreativeMode.PROMPT_TO_VIDEO || mode === CreativeMode.STORY_REEL) {
-        return this.createVideoJob(userId, dto, enhanced, cost, mode);
+        return this.createVideoJob(userId, dto, enhanced, totalCost, mode);
       }
 
       // Image-first creative tools
@@ -53,7 +73,7 @@ export class StudioService {
           projectId: dto.projectId || null,
           jobType: JobType.IMAGE_GEN,
           provider: image.provider,
-          creditsCost: cost,
+          creditsCost: imageCost,
           prompt: dto.prompt,
           status: 'COMPLETED',
           progress: 100,
@@ -71,29 +91,68 @@ export class StudioService {
         include: { outputFile: true },
       });
 
-      // Optional: animate still → video when requested
-      if (dto.animate && image.fileId) {
-        const videoJob = await this.videos.createVideoJob(userId, {
-          jobType: JobType.IMAGE_TO_VIDEO,
-          inputFileId: image.fileId,
-          prompt: enhanced,
-          projectId: dto.projectId,
-          settings: {
-            style: dto.style || 'anime',
-            aspect: dto.aspect || '9:16',
-            fromStudioMode: mode,
-          },
-        });
+      // Optional: animate still → video (credits already included above)
+      if (willAnimate && image.fileId) {
+        const videoJob = await this.createAnimateJob(
+          userId,
+          image.fileId,
+          enhanced,
+          dto,
+          mode,
+          animateCost,
+        );
         return { imageJob: this.format(job), videoJob, mode };
       }
 
       return this.format(job);
     } catch (error) {
-      await this.credits.refundCredits(userId, cost, undefined, 'Studio failed refund');
+      await this.credits.refundCredits(
+        userId,
+        totalCost,
+        undefined,
+        'Studio failed refund',
+      );
       const message = error instanceof Error ? error.message : 'Studio generation failed';
       this.logger.error(message);
       throw new BadRequestException(message);
     }
+  }
+
+  private async ensureLaunchCredits(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return;
+    if (user.creditBalance > 0) return;
+    const grant = this.config.get<number>('credits.signupGrant') ?? 50;
+    const topUp = Math.max(grant, 200);
+    await this.credits.grantCredits(
+      userId,
+      topUp,
+      'Welcome credits (auto top-up)',
+    );
+  }
+
+  /** Create I2V job without a second debit (studio already charged). */
+  private createAnimateJob(
+    userId: string,
+    inputFileId: string,
+    prompt: string,
+    dto: CreateStudioDto,
+    mode: CreativeMode,
+    _creditsCost: number,
+  ) {
+    return this.videos.createVideoJob(userId, {
+      jobType: JobType.IMAGE_TO_VIDEO,
+      inputFileId,
+      prompt,
+      projectId: dto.projectId,
+      skipCreditDebit: true,
+      settings: {
+        style: dto.style || 'anime',
+        aspect: dto.aspect || '9:16',
+        fromStudioMode: mode,
+        creditsPrepaid: true,
+      },
+    });
   }
 
   private async createVideoJob(

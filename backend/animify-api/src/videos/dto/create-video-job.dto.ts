@@ -1,5 +1,12 @@
-import { IsEnum, IsObject, IsOptional, IsString, IsUUID } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  IsBoolean,
+  IsEnum,
+  IsObject,
+  IsOptional,
+  IsString,
+  IsUUID,
+} from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { JobType } from '@prisma/client';
 
 export class CreateVideoJobDto {
@@ -32,4 +39,10 @@ export class CreateVideoJobDto {
   @IsOptional()
   @IsObject()
   settings?: Record<string, any>;
+
+  /** When true, caller already charged credits (e.g. Studio prepaid bundle). */
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  skipCreditDebit?: boolean;
 }

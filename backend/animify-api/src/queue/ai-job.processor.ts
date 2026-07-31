@@ -11,6 +11,7 @@ import { ConfigService } from '@nestjs/config';
 import { FalProvider } from '../ai-providers/providers/fal.provider';
 import { ReplicateProvider } from '../ai-providers/providers/replicate.provider';
 import type { AiProvider } from '../ai-providers/providers/ai-provider.interface';
+import { StoryPipelineService } from '../ai-providers/story-pipeline.service';
 
 @Processor(AI_JOBS_QUEUE)
 export class AiJobProcessor {
@@ -25,6 +26,7 @@ export class AiJobProcessor {
     private readonly config: ConfigService,
     private readonly fal: FalProvider,
     private readonly replicate: ReplicateProvider,
+    private readonly storyPipeline: StoryPipelineService,
   ) {}
 
   /** Prefer Replicate — Fal is often balance-locked. */
@@ -83,6 +85,72 @@ export class AiJobProcessor {
 
       const settings = (videoJob.settings || {}) as Record<string, any>;
       const style = settings.style || 'anime';
+
+      // Scripted long-form story (15/30/59s) — user only sees "Processing"
+      if (
+        settings.pipeline === 'scripted_story' ||
+        settings.mode === 'story_reel' ||
+        (videoJob.jobType === 'TEXT_TO_VIDEO' &&
+          Number(settings.targetDuration || settings.duration) >= 15)
+      ) {
+        const result = await this.storyPipeline.run({
+          jobId,
+          userId: videoJob.userId,
+          script: videoJob.prompt || settings.enhancedPrompt || '',
+          style,
+          aspect: settings.aspect || '9:16',
+          targetDuration: Number(
+            settings.targetDuration || settings.duration || 30,
+          ),
+          characterFileIds: Array.isArray(settings.characterFileIds)
+            ? settings.characterFileIds
+            : [],
+          onProgress: async (progress) => emit(progress, 'Processing'),
+        });
+
+        await emit(96, 'Processing');
+        const outputKey = this.storage.buildStorageKey(
+          videoJob.userId,
+          `out_${Date.now()}`,
+          result.fileName,
+        );
+        await this.storage.uploadBuffer(
+          outputKey,
+          result.buffer,
+          result.mimeType,
+        );
+        const { downloadUrl: outUrl, expiresAt } =
+          await this.storage.getDownloadUrl(outputKey);
+        const outputFile = await this.prisma.videoFile.create({
+          data: {
+            type: 'OUTPUT',
+            originalName: result.fileName,
+            mimeType: result.mimeType,
+            sizeBytes: BigInt(result.buffer.length),
+            storageKey: outputKey,
+            downloadUrl: outUrl,
+            downloadUrlExpiresAt: expiresAt,
+          },
+        });
+        await this.prisma.videoJob.update({
+          where: { id: jobId },
+          data: {
+            status: 'COMPLETED',
+            progress: 100,
+            currentStep: 'Completed',
+            outputFileId: outputFile.id,
+            completedAt: new Date(),
+            provider: 'story-pipeline',
+          },
+        });
+        this.gateway.emitJobUpdate(videoJob.userId, {
+          jobId,
+          progress: 100,
+          step: 'Completed',
+          status: 'COMPLETED',
+        });
+        return;
+      }
 
       // Paid video providers for T2V / I2V (Replicate first, Fal fallback)
       if (

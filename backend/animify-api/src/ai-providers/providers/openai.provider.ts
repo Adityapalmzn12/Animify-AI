@@ -26,6 +26,27 @@ export class OpenAiProvider implements AiProvider {
     return 5;
   }
 
+  private imageModel(): string {
+    return (
+      this.config.get<string>('ai.openai.imageModel') ||
+      process.env.OPENAI_IMAGE_MODEL ||
+      'gpt-image-1'
+    );
+  }
+
+  private sizeFor(aspect?: string, model?: string): string {
+    const m = model || this.imageModel();
+    // gpt-image-* supported sizes
+    if (m.startsWith('gpt-image')) {
+      if (aspect === '16:9') return '1536x1024';
+      if (aspect === '9:16') return '1024x1536';
+      return '1024x1024';
+    }
+    // dall-e-2 / legacy
+    if (aspect === '16:9' || aspect === '9:16') return '1024x1024';
+    return '1024x1024';
+  }
+
   async submit(input: AiSubmitInput): Promise<AiSubmitResult> {
     const key = this.config.get<string>('ai.openai.apiKey');
     if (!key) throw new Error('OPENAI_API_KEY not configured');
@@ -40,50 +61,65 @@ export class OpenAiProvider implements AiProvider {
     }
 
     if (input.jobType === 'IMAGE_GEN') {
-      const size =
-        (input.settings?.aspect as string) === '16:9'
-          ? '1792x1024'
-          : (input.settings?.aspect as string) === '9:16'
-            ? '1024x1792'
-            : '1024x1024';
+      const preferred = this.imageModel();
+      const attempts = [preferred, 'gpt-image-1', 'dall-e-2'].filter(
+        (v, i, a) => a.indexOf(v) === i,
+      );
+      let lastError = '';
 
-      const res = await fetch('https://api.openai.com/v1/images/generations', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${key}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'dall-e-3',
+      for (const model of attempts) {
+        const size = this.sizeFor(input.settings?.aspect as string, model);
+        const body: Record<string, unknown> = {
+          model,
           prompt: (input.prompt || 'beautiful illustration').slice(0, 3900),
           n: 1,
           size,
-          quality: 'hd',
-        }),
-      });
+        };
+        if (model.startsWith('gpt-image')) {
+          body.quality = 'high';
+        } else if (model === 'dall-e-2') {
+          // dall-e-2: no quality/hd
+        }
 
-      if (!res.ok) {
-        const errText = await res.text();
-        this.logger.error(`OpenAI image error: ${errText}`);
-        throw new Error(`OpenAI image failed: ${errText}`);
+        const res = await fetch('https://api.openai.com/v1/images/generations', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${key}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+          lastError = await res.text();
+          this.logger.warn(`OpenAI image model ${model} failed: ${lastError}`);
+          continue;
+        }
+
+        const data = (await res.json()) as {
+          data: { url?: string; b64_json?: string }[];
+        };
+        const item = data.data?.[0];
+        let resultUrl = item?.url;
+        if (!resultUrl && item?.b64_json) {
+          resultUrl = `data:image/png;base64,${item.b64_json}`;
+        }
+        if (!resultUrl) {
+          lastError = 'OpenAI returned empty image';
+          continue;
+        }
+
+        return {
+          externalId: input.jobId,
+          provider: this.name,
+          status: 'completed',
+          resultUrl,
+          metadata: { model },
+        };
       }
 
-      const data = (await res.json()) as {
-        data: { url?: string; b64_json?: string }[];
-      };
-      const item = data.data?.[0];
-      let resultUrl = item?.url;
-      if (!resultUrl && item?.b64_json) {
-        resultUrl = `data:image/png;base64,${item.b64_json}`;
-      }
-      if (!resultUrl) throw new Error('OpenAI returned empty image');
-
-      return {
-        externalId: input.jobId,
-        provider: this.name,
-        status: 'completed',
-        resultUrl,
-      };
+      this.logger.error(`OpenAI image error: ${lastError}`);
+      throw new Error(`OpenAI image failed: ${lastError}`);
     }
 
     throw new Error(`OpenAI provider does not support job type ${input.jobType}`);

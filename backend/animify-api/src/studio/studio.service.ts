@@ -11,6 +11,7 @@ import {
   CreateStudioDto,
   STYLE_PROMPTS,
 } from './dto/studio.dto';
+import { StoryPipelineService } from '../ai-providers/story-pipeline.service';
 
 @Injectable()
 export class StudioService {
@@ -46,10 +47,23 @@ export class StudioService {
     const animateCost = willAnimate
       ? this.config.get<number>('credits.imageToVideoCost') ?? 15
       : 0;
-    const totalCost =
-      mode === CreativeMode.PROMPT_TO_VIDEO || mode === CreativeMode.STORY_REEL
-        ? imageCost
-        : imageCost + animateCost;
+    const isScriptedVideo =
+      mode === CreativeMode.PROMPT_TO_VIDEO || mode === CreativeMode.STORY_REEL;
+    const targetDuration = isScriptedVideo
+      ? StoryPipelineService.normalizeDuration(dto.duration)
+      : undefined;
+    const segmentCount = targetDuration
+      ? StoryPipelineService.segmentPlan(targetDuration).length
+      : 1;
+    const perClip =
+      this.config.get<number>('credits.imageToVideoCost') ?? 15;
+    const audioCost =
+      isScriptedVideo && dto.addAudio !== false
+        ? this.config.get<number>('credits.voiceCost') ?? 3
+        : 0;
+    const totalCost = isScriptedVideo
+      ? segmentCount * perClip + audioCost
+      : imageCost + animateCost;
 
     await this.credits.debitCredits(
       userId,
@@ -61,8 +75,15 @@ export class StudioService {
     const enhanced = this.buildPrompt(mode, dto);
 
     try {
-      if (mode === CreativeMode.PROMPT_TO_VIDEO || mode === CreativeMode.STORY_REEL) {
-        return this.createVideoJob(userId, dto, enhanced, totalCost, mode);
+      if (isScriptedVideo) {
+        return this.createScriptedVideoJob(
+          userId,
+          dto,
+          enhanced,
+          totalCost,
+          mode,
+          targetDuration!,
+        );
       }
 
       // Image-first creative tools
@@ -155,24 +176,33 @@ export class StudioService {
     });
   }
 
-  private async createVideoJob(
+  /** Long-form scripted video: segments + audio, billed once up front. */
+  private createScriptedVideoJob(
     userId: string,
     dto: CreateStudioDto,
     enhanced: string,
     cost: number,
     mode: CreativeMode,
+    targetDuration: 15 | 30 | 59,
   ) {
-    // VideosService will debit again — refund our studio debit and let videos own billing
-    await this.credits.refundCredits(userId, cost, undefined, 'Studio video handoff');
     return this.videos.createVideoJob(userId, {
       jobType: JobType.TEXT_TO_VIDEO,
-      prompt: enhanced,
+      prompt: dto.prompt,
       projectId: dto.projectId,
+      skipCreditDebit: true,
       settings: {
         mode,
+        pipeline: 'scripted_story',
+        enhancedPrompt: enhanced,
         aspect: dto.aspect || '9:16',
         style: dto.style || 'cinematic',
-        duration: dto.duration || 5,
+        duration: targetDuration,
+        targetDuration,
+        characterFileIds: dto.characterImageFileIds || [],
+        addAudio: dto.addAudio !== false,
+        creditsPrepaid: true,
+        prepaidCredits: cost,
+        hidePipelineDetails: true,
       },
     });
   }
@@ -251,7 +281,10 @@ export class StudioService {
 
   private costFor(mode: CreativeMode): number {
     if (mode === CreativeMode.PROMPT_TO_VIDEO || mode === CreativeMode.STORY_REEL) {
-      return this.config.get<number>('credits.textToVideoCost') ?? 20;
+      // Default quote for 30s scripted story (~3 clips)
+      const perClip =
+        this.config.get<number>('credits.imageToVideoCost') ?? 15;
+      return perClip * 3 + (this.config.get<number>('credits.voiceCost') ?? 3);
     }
     if (mode === CreativeMode.BRAND_KIT) {
       return (this.config.get<number>('credits.imageGenCost') ?? 4) * 2;

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/network/api_client.dart';
 import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/app_text_field.dart';
+import '../../../../core/widgets/themed_choice_chip.dart';
 
 class ScriptWriterPage extends ConsumerStatefulWidget {
   const ScriptWriterPage({super.key});
@@ -15,10 +17,13 @@ class ScriptWriterPage extends ConsumerStatefulWidget {
 class _ScriptWriterPageState extends ConsumerState<ScriptWriterPage> {
   final _promptController = TextEditingController();
   String _type = 'reel';
+  int _duration = 30;
   bool _loading = false;
+  bool _makingVideo = false;
   String? _script;
 
   static const _types = ['reel', 'youtube', 'ads', 'story', 'scene', 'podcast'];
+  static const _durations = [15, 30, 59];
 
   @override
   void dispose() {
@@ -38,7 +43,8 @@ class _ScriptWriterPageState extends ConsumerState<ScriptWriterPage> {
         '/scripts/generate',
         data: {
           'type': _type,
-          'prompt': _promptController.text.trim(),
+          'prompt':
+              '${_promptController.text.trim()}\nTarget length: ${_duration}s. Format as Scene 1, Scene 2, etc.',
         },
       );
       final data = res.data ?? {};
@@ -63,6 +69,43 @@ class _ScriptWriterPageState extends ConsumerState<ScriptWriterPage> {
     }
   }
 
+  Future<void> _createVideo() async {
+    final script = (_script ?? _promptController.text).trim();
+    if (script.length < 3) return;
+    setState(() => _makingVideo = true);
+    try {
+      final api = ref.read(apiClientProvider);
+      final res = await api.post<Map<String, dynamic>>(
+        '/studio/generate',
+        data: {
+          'mode': 'story_reel',
+          'prompt': script,
+          'duration': _duration,
+          'aspect': '9:16',
+          'addAudio': true,
+          'style': 'cinematic',
+        },
+      );
+      final jobId = res.data?['id'] as String?;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Video processing started')),
+        );
+        if (jobId != null) {
+          context.go('/videos/$jobId');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _makingVideo = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -77,14 +120,32 @@ class _ScriptWriterPageState extends ConsumerState<ScriptWriterPage> {
             maxLines: 3,
           ),
           const SizedBox(height: 16),
+          Text('Format', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 8),
           Wrap(
             spacing: 8,
+            runSpacing: 8,
             children: _types
                 .map(
-                  (t) => ChoiceChip(
-                    label: Text(t),
+                  (t) => ThemedChoiceChip(
+                    label: t,
                     selected: _type == t,
                     onSelected: (_) => setState(() => _type = t),
+                  ),
+                )
+                .toList(),
+          ),
+          const SizedBox(height: 16),
+          Text('Video length', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            children: _durations
+                .map(
+                  (d) => ThemedChoiceChip(
+                    label: '${d}s',
+                    selected: _duration == d,
+                    onSelected: (_) => setState(() => _duration = d),
                   ),
                 )
                 .toList(),
@@ -98,6 +159,12 @@ class _ScriptWriterPageState extends ConsumerState<ScriptWriterPage> {
           if (_script != null) ...[
             const SizedBox(height: 24),
             SelectableText(_script!),
+            const SizedBox(height: 16),
+            AppButton(
+              onPressed: _makingVideo ? null : _createVideo,
+              isLoading: _makingVideo,
+              child: Text('Create ${_duration}s Video'),
+            ),
           ],
         ],
       ),

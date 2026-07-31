@@ -127,7 +127,7 @@ export class VideosService {
           jobType,
           provider,
           creditsCost: prepaid
-            ? this.creditCostFor(jobType)
+            ? Number(settings.prepaidCredits) || this.creditCostFor(jobType)
             : creditsCost,
           status: 'PENDING',
           progress: 0,
@@ -401,7 +401,15 @@ export class VideosService {
       prompt: job.prompt || null,
       status: String(job.status).toLowerCase(),
       progress: job.progress || 0,
-      currentStep: job.currentStep,
+      // Never expose segment/stitch details for scripted story jobs
+      currentStep:
+        settings.hidePipelineDetails || settings.pipeline === 'scripted_story'
+          ? job.status === 'COMPLETED'
+            ? 'Completed'
+            : job.status === 'FAILED'
+              ? 'Failed'
+              : 'Processing'
+          : job.currentStep,
       errorMessage: job.errorMessage,
       settings: {
         removeBackground: settings.removeBackground ?? true,
@@ -414,7 +422,7 @@ export class VideosService {
         style: profile.id,
         styleName,
         aspect: settings.aspect,
-        duration: settings.duration,
+        duration: settings.duration || settings.targetDuration,
         provider: settings.provider || job.provider,
       },
       createdAt: job.createdAt.toISOString(),

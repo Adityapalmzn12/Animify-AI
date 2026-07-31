@@ -5,6 +5,7 @@ import '../../../../core/network/api_client.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/app_text_field.dart';
+import '../../../../core/widgets/themed_choice_chip.dart';
 
 class ImageGenPage extends ConsumerStatefulWidget {
   final String initialStyle;
@@ -94,8 +95,8 @@ class _ImageGenPageState extends ConsumerState<ImageGenPage> {
             spacing: 8,
             runSpacing: 8,
             children: _styles.map((s) {
-              return ChoiceChip(
-                label: Text(s),
+              return ThemedChoiceChip(
+                label: s,
                 selected: _style == s,
                 onSelected: (_) => setState(() => _style = s),
               );

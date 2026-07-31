@@ -32,10 +32,10 @@ export class ReplicateProvider implements AiProvider {
   }
 
   private modelPath(jobType: string): string {
-    // Official Replicate model slugs (no version hash required)
-    if (jobType === 'IMAGE_TO_VIDEO') {
-      return 'minimax/video-01';
+    if (jobType === 'IMAGE_GEN') {
+      return 'black-forest-labs/flux-schnell';
     }
+    // Official Replicate model slugs (no version hash required)
     return 'minimax/video-01';
   }
 
@@ -43,14 +43,23 @@ export class ReplicateProvider implements AiProvider {
     if (!this.isConfigured()) throw new Error('REPLICATE_API_TOKEN not configured');
 
     const model = this.modelPath(input.jobType);
-    const body = {
-      input: {
-        prompt: input.prompt || 'cinematic video',
-        ...(input.inputUrl
-          ? { first_frame_image: input.inputUrl }
-          : {}),
-      },
-    };
+    const body =
+      input.jobType === 'IMAGE_GEN'
+        ? {
+            input: {
+              prompt: input.prompt || 'beautiful illustration',
+              go_fast: true,
+              output_format: 'png',
+            },
+          }
+        : {
+            input: {
+              prompt: input.prompt || 'cinematic video',
+              ...(input.inputUrl
+                ? { first_frame_image: input.inputUrl }
+                : {}),
+            },
+          };
 
     const res = await fetch(
       `https://api.replicate.com/v1/models/${model}/predictions`,

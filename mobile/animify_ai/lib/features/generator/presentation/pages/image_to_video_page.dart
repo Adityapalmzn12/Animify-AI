@@ -8,6 +8,7 @@ import '../../../../core/router/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/app_text_field.dart';
+import '../../../../core/widgets/themed_choice_chip.dart';
 
 class ImageToVideoPage extends ConsumerStatefulWidget {
   const ImageToVideoPage({super.key});
@@ -203,8 +204,8 @@ class _ImageToVideoPageState extends ConsumerState<ImageToVideoPage> {
               Wrap(
                 spacing: 8,
                 children: _styles.map((s) {
-                  return ChoiceChip(
-                    label: Text(s),
+                  return ThemedChoiceChip(
+                    label: s,
                     selected: _style == s,
                     onSelected: (_) => setState(() => _style = s),
                   );

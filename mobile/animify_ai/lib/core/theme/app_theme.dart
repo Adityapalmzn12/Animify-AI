@@ -152,7 +152,17 @@ class AppTheme {
       ),
       chipTheme: ChipThemeData(
         backgroundColor: AppColors.lightColorScheme.surfaceContainerHighest,
-        labelStyle: AppTypography.textTheme.labelMedium,
+        selectedColor: AppColors.lightColorScheme.primaryContainer,
+        secondarySelectedColor: AppColors.lightColorScheme.primaryContainer,
+        checkmarkColor: AppColors.lightColorScheme.onPrimaryContainer,
+        labelStyle: AppTypography.textTheme.labelMedium?.copyWith(
+          color: AppColors.lightColorScheme.onSurface,
+        ),
+        secondaryLabelStyle: AppTypography.textTheme.labelMedium?.copyWith(
+          color: AppColors.lightColorScheme.onPrimaryContainer,
+          fontWeight: FontWeight.w600,
+        ),
+        side: BorderSide(color: AppColors.lightColorScheme.outlineVariant),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8),
         ),
@@ -314,7 +324,17 @@ class AppTheme {
       ),
       chipTheme: ChipThemeData(
         backgroundColor: AppColors.darkColorScheme.surfaceContainerHighest,
-        labelStyle: AppTypography.textTheme.labelMedium,
+        selectedColor: AppColors.darkColorScheme.primaryContainer,
+        secondarySelectedColor: AppColors.darkColorScheme.primaryContainer,
+        checkmarkColor: AppColors.darkColorScheme.onPrimaryContainer,
+        labelStyle: AppTypography.textTheme.labelMedium?.copyWith(
+          color: AppColors.darkColorScheme.onSurface,
+        ),
+        secondaryLabelStyle: AppTypography.textTheme.labelMedium?.copyWith(
+          color: AppColors.darkColorScheme.onPrimaryContainer,
+          fontWeight: FontWeight.w600,
+        ),
+        side: BorderSide(color: AppColors.darkColorScheme.outlineVariant),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8),
         ),

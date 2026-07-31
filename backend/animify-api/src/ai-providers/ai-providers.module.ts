@@ -7,8 +7,12 @@ import { OpenAiProvider } from './providers/openai.provider';
 import { GeminiProvider } from './providers/gemini.provider';
 import { HuggingFaceProvider } from './providers/huggingface.provider';
 import { AiProviderBus } from './providers/ai-provider.bus';
+import { StoryPipelineService } from './story-pipeline.service';
+import { PrismaModule } from '../prisma/prisma.module';
+import { StorageModule } from '../storage/storage.module';
 
 @Module({
+  imports: [PrismaModule, StorageModule],
   providers: [
     AiStylizeService,
     OssWorkerProvider,
@@ -18,6 +22,7 @@ import { AiProviderBus } from './providers/ai-provider.bus';
     GeminiProvider,
     HuggingFaceProvider,
     AiProviderBus,
+    StoryPipelineService,
   ],
   exports: [
     AiStylizeService,
@@ -27,6 +32,7 @@ import { AiProviderBus } from './providers/ai-provider.bus';
     OpenAiProvider,
     GeminiProvider,
     HuggingFaceProvider,
+    StoryPipelineService,
   ],
 })
 export class AiProvidersModule {}

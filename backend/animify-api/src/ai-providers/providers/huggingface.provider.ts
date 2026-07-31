@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   AiProvider,
@@ -10,6 +10,7 @@ import {
 @Injectable()
 export class HuggingFaceProvider implements AiProvider {
   readonly name = 'huggingface';
+  private readonly logger = new Logger(HuggingFaceProvider.name);
 
   constructor(private readonly config: ConfigService) {}
 
@@ -25,21 +26,30 @@ export class HuggingFaceProvider implements AiProvider {
     const key = this.config.get<string>('ai.huggingface.apiKey');
     if (!key) throw new Error('HUGGINGFACE_API_KEY not configured');
     const model = 'black-forest-labs/FLUX.1-schnell';
-    const res = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${key}`,
-        'Content-Type': 'application/json',
+    const res = await fetch(
+      `https://api-inference.huggingface.co/models/${model}`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${key}`,
+          'Content-Type': 'application/json',
+          Accept: 'image/png',
+        },
+        body: JSON.stringify({ inputs: input.prompt || 'anime scene' }),
       },
-      body: JSON.stringify({ inputs: input.prompt || 'anime scene' }),
-    });
-    if (!res.ok) throw new Error(`HuggingFace failed: ${await res.text()}`);
-    // Binary image — caller should upload; we mark completed with note
+    );
+    if (!res.ok) {
+      const text = await res.text();
+      this.logger.error(`HuggingFace failed: ${text}`);
+      throw new Error(`HuggingFace failed: ${res.status} ${text}`);
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    const mime = res.headers.get('content-type') || 'image/png';
     return {
       externalId: input.jobId,
       provider: this.name,
       status: 'completed',
-      metadata: { contentType: res.headers.get('content-type') || 'image/jpeg' },
+      resultUrl: `data:${mime};base64,${buf.toString('base64')}`,
     };
   }
 

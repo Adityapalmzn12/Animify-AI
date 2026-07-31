@@ -6,6 +6,7 @@ import '../../../../core/network/api_client.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/app_text_field.dart';
+import '../../../../core/widgets/themed_choice_chip.dart';
 
 class TextToVideoPage extends ConsumerStatefulWidget {
   const TextToVideoPage({super.key});
@@ -19,10 +20,12 @@ class _TextToVideoPageState extends ConsumerState<TextToVideoPage> {
   final _promptController = TextEditingController();
   String _aspect = '9:16';
   String _style = 'anime';
+  int _duration = 30;
   bool _isSubmitting = false;
 
   static const _aspects = ['9:16', '16:9', '1:1'];
   static const _styles = ['anime', 'cartoon', '3d', 'cinematic', 'watercolor'];
+  static const _durations = [15, 30, 59];
 
   @override
   void dispose() {
@@ -37,12 +40,14 @@ class _TextToVideoPageState extends ConsumerState<TextToVideoPage> {
     try {
       final apiClient = ref.read(apiClientProvider);
       final res = await apiClient.post<Map<String, dynamic>>(
-        '/generator',
+        '/studio/generate',
         data: {
-          'jobType': 'TEXT_TO_VIDEO',
+          'mode': 'story_reel',
           'prompt': _promptController.text.trim(),
           'aspect': _aspect,
           'style': _style,
+          'duration': _duration,
+          'addAudio': true,
         },
       );
 
@@ -105,16 +110,28 @@ class _TextToVideoPageState extends ConsumerState<TextToVideoPage> {
                 onSelectionChanged: (s) => setState(() => _aspect = s.first),
               ),
               const SizedBox(height: 24),
+              Text('Length', style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: _durations.map((d) {
+                  return ThemedChoiceChip(
+                    label: '${d}s',
+                    selected: _duration == d,
+                    onSelected: (_) => setState(() => _duration = d),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 24),
               Text('Style', style: Theme.of(context).textTheme.titleSmall),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: _styles.map((s) {
-                  final selected = _style == s;
-                  return ChoiceChip(
-                    label: Text(s),
-                    selected: selected,
+                  return ThemedChoiceChip(
+                    label: s,
+                    selected: _style == s,
                     onSelected: (_) => setState(() => _style = s),
                   );
                 }).toList(),
@@ -123,7 +140,7 @@ class _TextToVideoPageState extends ConsumerState<TextToVideoPage> {
               AppButton(
                 onPressed: _isSubmitting ? null : _submit,
                 isLoading: _isSubmitting,
-                child: const Text('Generate Video'),
+                child: Text('Generate ${_duration}s Video'),
               ),
             ],
           ),

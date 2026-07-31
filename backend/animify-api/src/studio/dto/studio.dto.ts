@@ -87,12 +87,24 @@ export class CreateStudioDto {
   @IsString()
   aspect?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    description: 'Target video length in seconds (15 | 30 | 59)',
+    example: 30,
+  })
   @IsOptional()
   @IsInt()
-  @Min(2)
-  @Max(15)
+  @Min(15)
+  @Max(59)
   duration?: number;
+
+  @ApiPropertyOptional({
+    description: 'Character / reference image file IDs for consistent cast',
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  characterImageFileIds?: string[];
 
   @ApiPropertyOptional({
     description: 'After image gen, also create image-to-video',
@@ -100,6 +112,11 @@ export class CreateStudioDto {
   @IsOptional()
   @IsBoolean()
   animate?: boolean;
+
+  @ApiPropertyOptional({ description: 'Mux narration audio onto story video' })
+  @IsOptional()
+  @IsBoolean()
+  addAudio?: boolean;
 
   @ApiPropertyOptional()
   @IsOptional()

@@ -17,6 +17,11 @@ function isRecoverableProviderError(error: unknown): boolean {
     msg.includes('exhausted balance') ||
     msg.includes('user is locked') ||
     msg.includes('billing') ||
+    msg.includes('hard limit') ||
+    msg.includes('quota') ||
+    msg.includes('insufficient') ||
+    msg.includes('does not exist') ||
+    msg.includes('invalid_value') ||
     msg.includes('402') ||
     msg.includes('403') ||
     msg.includes('429') ||
@@ -70,7 +75,7 @@ export class AiProviderBus {
       case 'fal':
         return ['text_to_video', 'image_to_video', 'image'];
       case 'replicate':
-        return ['text_to_video', 'image_to_video'];
+        return ['text_to_video', 'image_to_video', 'image'];
       case 'huggingface':
         return ['image'];
       case 'oss':
@@ -103,9 +108,9 @@ export class AiProviderBus {
 
     if (jobType === 'SCRIPT') {
       ordered = [this.openai, this.gemini];
-    } else if (jobType === 'IMAGE_GEN') {
-      // Prefer OpenAI; Fal is often balance-locked in this project
-      ordered = [this.openai, this.huggingface, this.fal];
+    } else     if (jobType === 'IMAGE_GEN') {
+      // Replicate Flux is reliable when OpenAI/Fal billing is blocked
+      ordered = [this.replicate, this.openai, this.huggingface, this.fal];
     } else if (
       jobType === 'TEXT_TO_VIDEO' ||
       jobType === 'IMAGE_TO_VIDEO' ||

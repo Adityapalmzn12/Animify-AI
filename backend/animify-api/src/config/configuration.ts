@@ -116,6 +116,7 @@ export default () => ({
     },
     openai: {
       apiKey: process.env.OPENAI_API_KEY,
+      imageModel: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1',
     },
     gemini: {
       apiKey: process.env.GEMINI_API_KEY,

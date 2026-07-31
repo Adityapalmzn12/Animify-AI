@@ -58,6 +58,17 @@ export class FalProvider implements AiProvider {
     if (!res.ok) {
       const text = await res.text();
       this.logger.error(`Fal submit failed: ${text}`);
+      if (
+        res.status === 402 ||
+        res.status === 403 ||
+        /exhausted balance|locked|billing/i.test(text)
+      ) {
+        const err = new Error(
+          'Fal balance exhausted — top up at fal.ai/dashboard/billing',
+        );
+        (err as Error & { code?: string }).code = 'PROVIDER_BILLING';
+        throw err;
+      }
       throw new Error(`Fal submit failed: ${res.status} ${text}`);
     }
 

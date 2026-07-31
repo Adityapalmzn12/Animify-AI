@@ -8,6 +8,25 @@ import { OpenAiProvider } from './openai.provider';
 import { GeminiProvider } from './gemini.provider';
 import { HuggingFaceProvider } from './huggingface.provider';
 
+function isRecoverableProviderError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const code = (error as Error & { code?: string }).code;
+  if (code === 'PROVIDER_BILLING') return true;
+  const msg = error.message.toLowerCase();
+  return (
+    msg.includes('exhausted balance') ||
+    msg.includes('user is locked') ||
+    msg.includes('billing') ||
+    msg.includes('402') ||
+    msg.includes('403') ||
+    msg.includes('429') ||
+    msg.includes('503') ||
+    msg.includes('timeout') ||
+    msg.includes('econnrefused') ||
+    msg.includes('fetch failed')
+  );
+}
+
 @Injectable()
 export class AiProviderBus {
   private readonly logger = new Logger(AiProviderBus.name);
@@ -77,28 +96,41 @@ export class AiProviderBus {
     return fallback;
   }
 
-  forJobType(jobType: string): AiProvider {
+  /** Ordered candidates for a job type (preferred first). */
+  candidatesFor(jobType: string): AiProvider[] {
+    const preferred = (this.config.get<string>('ai.provider') || '').toLowerCase();
+    let ordered: AiProvider[] = [];
+
     if (jobType === 'SCRIPT') {
-      if (this.openai.isConfigured()) return this.openai;
-      if (this.gemini.isConfigured()) return this.gemini;
-    }
-    if (jobType === 'IMAGE_GEN') {
-      if (this.openai.isConfigured()) return this.openai;
-      if (this.fal.isConfigured()) return this.fal;
-      if (this.huggingface.isConfigured()) return this.huggingface;
-    }
-    if (
+      ordered = [this.openai, this.gemini];
+    } else if (jobType === 'IMAGE_GEN') {
+      // Prefer OpenAI; Fal is often balance-locked in this project
+      ordered = [this.openai, this.huggingface, this.fal];
+    } else if (
       jobType === 'TEXT_TO_VIDEO' ||
       jobType === 'IMAGE_TO_VIDEO' ||
       jobType === 'STORY_REEL'
     ) {
-      if (this.fal.isConfigured()) return this.fal;
-      if (this.replicate.isConfigured()) return this.replicate;
+      // Prefer Replicate — Fal account is currently exhausted
+      ordered = [this.replicate, this.fal];
+    } else if (jobType === 'STYLIZE' || String(jobType).startsWith('EDIT_')) {
+      ordered = [this.oss];
+    } else {
+      ordered = [...this.providers];
     }
-    if (jobType === 'STYLIZE' || String(jobType).startsWith('EDIT_')) {
-      return this.oss;
+
+    const configured = ordered.filter((p) => p.isConfigured());
+    if (preferred) {
+      const pref = configured.find((p) => p.name === preferred);
+      if (pref) {
+        return [pref, ...configured.filter((p) => p !== pref)];
+      }
     }
-    return this.resolve();
+    return configured.length ? configured : [this.oss];
+  }
+
+  forJobType(jobType: string): AiProvider {
+    return this.candidatesFor(jobType)[0] || this.resolve();
   }
 
   estimate(jobType: string, settings?: Record<string, unknown>) {
@@ -106,8 +138,24 @@ export class AiProviderBus {
   }
 
   async submit(input: AiSubmitInput) {
-    const provider = this.forJobType(input.jobType);
-    this.logger.log(`Submitting ${input.jobType} via ${provider.name}`);
-    return provider.submit(input);
+    const candidates = this.candidatesFor(input.jobType);
+    let lastError: unknown;
+    for (const provider of candidates) {
+      this.logger.log(`Submitting ${input.jobType} via ${provider.name}`);
+      try {
+        return await provider.submit(input);
+      } catch (error) {
+        lastError = error;
+        if (!isRecoverableProviderError(error) || candidates.length === 1) {
+          throw error;
+        }
+        this.logger.warn(
+          `${provider.name} failed (${error instanceof Error ? error.message : error}); trying next provider`,
+        );
+      }
+    }
+    throw lastError instanceof Error
+      ? lastError
+      : new Error('All AI providers failed');
   }
 }

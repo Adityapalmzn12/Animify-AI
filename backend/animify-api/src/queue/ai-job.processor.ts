@@ -10,6 +10,7 @@ import { AI_JOBS_QUEUE } from './queue.constants';
 import { ConfigService } from '@nestjs/config';
 import { FalProvider } from '../ai-providers/providers/fal.provider';
 import { ReplicateProvider } from '../ai-providers/providers/replicate.provider';
+import type { AiProvider } from '../ai-providers/providers/ai-provider.interface';
 
 @Processor(AI_JOBS_QUEUE)
 export class AiJobProcessor {
@@ -25,6 +26,30 @@ export class AiJobProcessor {
     private readonly fal: FalProvider,
     private readonly replicate: ReplicateProvider,
   ) {}
+
+  /** Prefer Replicate — Fal is often balance-locked. */
+  private videoProviders(): AiProvider[] {
+    const list: AiProvider[] = [];
+    if (this.replicate.isConfigured()) list.push(this.replicate);
+    if (this.fal.isConfigured()) list.push(this.fal);
+    return list;
+  }
+
+  private isRecoverable(error: unknown): boolean {
+    if (!(error instanceof Error)) return false;
+    const code = (error as Error & { code?: string }).code;
+    if (code === 'PROVIDER_BILLING') return true;
+    const msg = error.message.toLowerCase();
+    return (
+      msg.includes('exhausted balance') ||
+      msg.includes('user is locked') ||
+      msg.includes('billing') ||
+      msg.includes('402') ||
+      msg.includes('403') ||
+      msg.includes('429') ||
+      msg.includes('503')
+    );
+  }
 
   @Process('process')
   async handle(job: Job<{ jobId: string }>) {
@@ -59,15 +84,13 @@ export class AiJobProcessor {
       const settings = (videoJob.settings || {}) as Record<string, any>;
       const style = settings.style || 'anime';
 
-      // Paid video providers for T2V / I2V
+      // Paid video providers for T2V / I2V (Replicate first, Fal fallback)
       if (
         videoJob.jobType === 'TEXT_TO_VIDEO' ||
         videoJob.jobType === 'IMAGE_TO_VIDEO'
       ) {
-        const falKey = this.config.get<string>('ai.fal.apiKey');
-        const replicateToken = this.config.get<string>('ai.replicate.apiToken');
-        if (falKey || replicateToken) {
-          const provider = falKey ? this.fal : this.replicate;
+        const providers = this.videoProviders();
+        if (providers.length) {
           let inputUrl: string | undefined;
           if (videoJob.inputFile) {
             const signed = await this.storage.getDownloadUrl(
@@ -76,59 +99,78 @@ export class AiJobProcessor {
             inputUrl = signed.downloadUrl;
           }
 
-          await emit(30, `Submitting to ${provider.name}`);
-          const submitted = await provider.submit({
-            jobId,
-            jobType: videoJob.jobType,
-            prompt:
-              videoJob.prompt ||
-              `cinematic ${style} scene with smooth motion`,
-            inputUrl,
-            style,
-            settings,
-          });
-
-          if (submitted.status === 'completed' && submitted.resultUrl) {
-            await this.saveRemoteVideo(
-              videoJob.userId,
-              jobId,
-              submitted.resultUrl,
-              provider.name,
-              emit,
-            );
-            return;
-          }
-
-          let polls = 0;
-          while (polls < 90) {
-            polls += 1;
-            await new Promise((r) => setTimeout(r, 4000));
-            const polled = await provider.poll(submitted.externalId);
-            await emit(
-              Math.min(88, 35 + polls),
-              `${provider.name}: ${polled.status}`,
-            );
-            if (polled.status === 'completed' && polled.resultUrl) {
-              await this.saveRemoteVideo(
-                videoJob.userId,
+          let lastError: unknown;
+          for (const provider of providers) {
+            try {
+              await emit(30, `Submitting to ${provider.name}`);
+              const submitted = await provider.submit({
                 jobId,
-                polled.resultUrl,
-                provider.name,
-                emit,
+                jobType: videoJob.jobType,
+                prompt:
+                  videoJob.prompt ||
+                  `cinematic ${style} scene with smooth motion`,
+                inputUrl,
+                style,
+                settings,
+              });
+
+              if (submitted.status === 'completed' && submitted.resultUrl) {
+                await this.saveRemoteVideo(
+                  videoJob.userId,
+                  jobId,
+                  submitted.resultUrl,
+                  provider.name,
+                  emit,
+                );
+                return;
+              }
+
+              let polls = 0;
+              while (polls < 90) {
+                polls += 1;
+                await new Promise((r) => setTimeout(r, 4000));
+                const polled = await provider.poll(submitted.externalId);
+                await emit(
+                  Math.min(88, 35 + polls),
+                  `${provider.name}: ${polled.status}`,
+                );
+                if (polled.status === 'completed' && polled.resultUrl) {
+                  await this.saveRemoteVideo(
+                    videoJob.userId,
+                    jobId,
+                    polled.resultUrl,
+                    provider.name,
+                    emit,
+                  );
+                  return;
+                }
+                if (polled.status === 'failed') {
+                  throw new Error(
+                    polled.error || `${provider.name} video failed`,
+                  );
+                }
+              }
+              throw new Error(`${provider.name} video generation timed out`);
+            } catch (error) {
+              lastError = error;
+              this.logger.warn(
+                `${provider.name} failed for ${jobId}: ${
+                  error instanceof Error ? error.message : error
+                }`,
               );
-              return;
-            }
-            if (polled.status === 'failed') {
-              throw new Error(polled.error || `${provider.name} video failed`);
+              if (!this.isRecoverable(error)) break;
+              // try next provider
             }
           }
-          throw new Error('Video generation timed out');
+          throw lastError instanceof Error
+            ? lastError
+            : new Error('All video providers failed');
         }
 
-        // I2V without Fal: fall through to OSS stylize if we have input
+        // I2V without paid keys: fall through to OSS stylize if we have input
         if (videoJob.jobType === 'TEXT_TO_VIDEO') {
           throw new Error(
-            'Text-to-video needs FAL_API_KEY or REPLICATE_API_TOKEN',
+            'Text-to-video needs REPLICATE_API_TOKEN or FAL_API_KEY',
           );
         }
       }

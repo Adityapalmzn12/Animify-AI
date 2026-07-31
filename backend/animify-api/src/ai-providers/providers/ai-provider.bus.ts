@@ -148,7 +148,31 @@ export class AiProviderBus {
     for (const provider of candidates) {
       this.logger.log(`Submitting ${input.jobType} via ${provider.name}`);
       try {
-        return await provider.submit(input);
+        const submitted = await provider.submit(input);
+        if (
+          input.jobType === 'IMAGE_GEN' &&
+          submitted.status !== 'completed' &&
+          !submitted.resultUrl
+        ) {
+          let polls = 0;
+          while (polls < 60) {
+            polls += 1;
+            await new Promise((r) => setTimeout(r, 2000));
+            const polled = await provider.poll(submitted.externalId);
+            if (polled.status === 'completed' && polled.resultUrl) {
+              return {
+                ...submitted,
+                status: 'completed' as const,
+                resultUrl: polled.resultUrl,
+              };
+            }
+            if (polled.status === 'failed') {
+              throw new Error(polled.error || `${provider.name} image failed`);
+            }
+          }
+          throw new Error(`${provider.name} image timed out`);
+        }
+        return submitted;
       } catch (error) {
         lastError = error;
         if (!isRecoverableProviderError(error) || candidates.length === 1) {

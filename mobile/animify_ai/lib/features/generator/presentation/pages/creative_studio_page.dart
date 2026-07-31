@@ -25,6 +25,7 @@ class _CreativeStudioPageState extends ConsumerState<CreativeStudioPage> {
   String? _selectedMode;
   bool _loadingModes = true;
   bool _submitting = false;
+  // Off by default — animate costs extra video credits.
   bool _animate = false;
   String? _resultUrl;
   String? _error;

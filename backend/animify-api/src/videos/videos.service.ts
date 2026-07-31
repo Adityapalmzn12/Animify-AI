@@ -94,7 +94,7 @@ export class VideosService {
     }
 
     const profile = resolveStyleProfile(styleSlug);
-    const settings = {
+    const settings: Record<string, any> = {
       ...(dto.settings || {}),
       style: profile.id,
       styleName: profile.name,
@@ -103,9 +103,7 @@ export class VideosService {
     };
 
     const prepaid =
-      dto.skipCreditDebit === true ||
-      settings.creditsPrepaid === true ||
-      (dto.settings as any)?.creditsPrepaid === true;
+      dto.skipCreditDebit === true || settings.creditsPrepaid === true;
     const creditsCost = prepaid ? 0 : this.creditCostFor(jobType);
     if (!prepaid) {
       await this.creditsService.debitCredits(

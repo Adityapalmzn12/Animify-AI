@@ -1,5 +1,3 @@
-Loaded Prisma config from prisma.config.ts.
-
 -- CreateEnum
 CREATE TYPE "JobType" AS ENUM ('STYLIZE', 'TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO', 'AVATAR', 'DUB', 'SUBTITLE', 'VOICE', 'SCRIPT', 'IMAGE_GEN', 'BG_REMOVE', 'EDIT_TRIM', 'EDIT_MERGE', 'EDIT_CROP', 'EDIT_FILTER', 'EDIT_EXPORT');
 
@@ -220,14 +218,3 @@ ALTER TABLE "video_jobs" ADD CONSTRAINT "video_jobs_project_id_fkey" FOREIGN KEY
 
 -- AddForeignKey
 ALTER TABLE "video_jobs" ADD CONSTRAINT "video_jobs_input_file_id_fkey" FOREIGN KEY ("input_file_id") REFERENCES "video_files"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-┌─────────────────────────────────────────────────────────┐
-│  Update available 6.19.3 -> 7.9.1                       │
-│                                                         │
-│  This is a major update - please follow the guide at    │
-│  https://pris.ly/d/major-version-upgrade                │
-│                                                         │
-│  Run the following to update                            │
-│    npm i --save-dev prisma@latest                       │
-│    npm i @prisma/client@latest                          │
-└─────────────────────────────────────────────────────────┘
-

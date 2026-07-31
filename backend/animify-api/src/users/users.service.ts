@@ -32,6 +32,8 @@ export class UsersService {
       data: {
         name: dto.name,
         avatarUrl: dto.avatarUrl,
+        locale: dto.locale,
+        fcmToken: dto.fcmToken,
       },
       include: {
         subscription: true,
@@ -42,9 +44,14 @@ export class UsersService {
   }
 
   async delete(id: string) {
+    await this.prisma.refreshToken.updateMany({
+      where: { userId: id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+
     await this.prisma.user.update({
       where: { id },
-      data: { status: 'DELETED' },
+      data: { status: 'DELETED', fcmToken: null },
     });
 
     return { message: 'Account deleted successfully' };
@@ -88,6 +95,9 @@ export class UsersService {
       name: user.name,
       avatarUrl: user.avatarUrl,
       emailVerified: user.emailVerified,
+      role: user.role || 'USER',
+      creditBalance: user.creditBalance ?? 0,
+      locale: user.locale || 'en',
       createdAt: user.createdAt,
       subscription: user.subscription
         ? {

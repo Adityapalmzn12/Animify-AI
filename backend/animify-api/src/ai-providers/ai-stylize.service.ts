@@ -176,37 +176,78 @@ export class AiStylizeService {
     originalName: string,
   ): Promise<StylizeResult> {
     const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'animify-'));
-    const inputPath = path.join(tmpDir, 'input.mp4');
+    const inputPath = path.join(tmpDir, 'input.bin');
     const outputPath = path.join(tmpDir, `output_${profile.id}.mp4`);
 
     try {
       const inputBuffer = await this.downloadToBuffer(videoUrl);
       await fs.promises.writeFile(inputPath, inputBuffer);
 
-      await this.runFfmpeg([
-        '-y',
-        '-i',
-        inputPath,
-        '-vf',
-        `scale='min(720,iw)':'min(720,ih)':force_original_aspect_ratio=decrease,${profile.ffmpegFilter}`,
-        '-c:v',
-        'libx264',
-        '-preset',
-        'ultrafast',
-        '-crf',
-        '28',
-        '-threads',
-        '2',
-        '-pix_fmt',
-        'yuv420p',
-        '-c:a',
-        'aac',
-        '-b:a',
-        '96k',
-        '-movflags',
-        '+faststart',
-        outputPath,
-      ]);
+      const sides = [480, 360, 320];
+      let lastError: Error | null = null;
+
+      for (const side of sides) {
+        const scale =
+          `scale='min(${side},iw)':'min(${side},ih)':force_original_aspect_ratio=decrease:flags=fast_bilinear,` +
+          `scale=trunc(iw/2)*2:trunc(ih/2)*2,fps=24,format=yuv420p`;
+        try {
+          await this.runFfmpeg([
+            '-y',
+            '-hide_banner',
+            '-loglevel',
+            'error',
+            '-threads',
+            '1',
+            '-filter_threads',
+            '1',
+            '-fflags',
+            '+genpts+discardcorrupt',
+            '-i',
+            inputPath,
+            '-map',
+            '0:v:0',
+            '-map',
+            '0:a:0?',
+            '-vf',
+            `${scale},${profile.ffmpegFilter}`,
+            '-c:v',
+            'libx264',
+            '-preset',
+            'ultrafast',
+            '-crf',
+            '30',
+            '-threads',
+            '1',
+            '-pix_fmt',
+            'yuv420p',
+            '-profile:v',
+            'baseline',
+            '-c:a',
+            'aac',
+            '-b:a',
+            '64k',
+            '-ac',
+            '1',
+            '-map_metadata',
+            '-1',
+            '-movflags',
+            '+faststart',
+            '-max_muxing_queue_size',
+            '9999',
+            outputPath,
+          ]);
+          lastError = null;
+          break;
+        } catch (err) {
+          lastError = err instanceof Error ? err : new Error(String(err));
+          this.logger.warn(`ffmpeg fallback failed at ${side}p: ${lastError.message}`);
+          await fs.promises.rm(outputPath, { force: true }).catch(() => undefined);
+        }
+      }
+
+      if (lastError || !(await fs.promises.stat(outputPath).catch(() => null))) {
+        throw lastError || new Error('ffmpeg stylize failed');
+      }
 
       const buffer = await fs.promises.readFile(outputPath);
       return {

@@ -2,15 +2,19 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
-  
-  const app = await NestFactory.create(AppModule);
+
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   const configService = app.get(ConfigService);
 
-  app.setGlobalPrefix('api/v1');
+  app.use(helmet({ contentSecurityPolicy: false }));
+  app.setGlobalPrefix('api/v1', {
+    exclude: ['health', 'ready'],
+  });
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -27,17 +31,35 @@ async function bootstrap() {
     origin: true,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Stripe-Signature'],
   });
 
   const nodeEnv = configService.get<string>('nodeEnv') || 'development';
   const config = new DocumentBuilder()
     .setTitle('Animify AI API')
-    .setDescription('API documentation for Animify AI platform')
-    .setVersion('1.0')
+    .setDescription(
+      'Full AI Video Generator platform — auth, projects, credits, AI jobs, editor, payments, admin',
+    )
+    .setVersion('2.0')
     .addBearerAuth()
+    .addTag('auth')
+    .addTag('users')
+    .addTag('videos')
+    .addTag('projects')
+    .addTag('credits')
+    .addTag('generator')
+    .addTag('studio')
+    .addTag('voices')
+    .addTag('scripts')
+    .addTag('images')
+    .addTag('editor')
+    .addTag('payments')
+    .addTag('notifications')
+    .addTag('favorites')
+    .addTag('admin')
+    .addTag('health')
     .build();
-  
+
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document);
   logger.log('Swagger documentation available at /api/docs');

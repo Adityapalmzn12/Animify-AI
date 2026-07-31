@@ -156,7 +156,9 @@ class AuthRepositoryImpl implements AuthRepository {
         VerifyOtpRequest(email: email, otp: otp, purpose: purpose),
       );
       
-      await _cacheAuthData(response);
+      if (purpose != 'password_reset') {
+        await _cacheAuthData(response);
+      }
       
       return Right((
         response.user.toEntity(),

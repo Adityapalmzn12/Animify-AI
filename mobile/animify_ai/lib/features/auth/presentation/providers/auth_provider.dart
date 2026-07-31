@@ -215,10 +215,36 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
         _streamController.add(AuthState.error(message: failure.displayMessage));
       },
       (data) {
+        if (purpose == 'password_reset') {
+          state = const AsyncValue.data(AuthState.unauthenticated());
+          _streamController.add(const AuthState.unauthenticated());
+          return;
+        }
         final authState = AuthState.authenticated(user: data.$1, tokens: data.$2);
         state = AsyncValue.data(authState);
         _streamController.add(authState);
       },
+    );
+  }
+
+  Future<bool> resetPassword({
+    required String email,
+    required String otp,
+    required String newPassword,
+  }) async {
+    final result = await _repository.resetPassword(
+      email: email,
+      otp: otp,
+      newPassword: newPassword,
+    );
+
+    return result.fold(
+      (failure) {
+        state = AsyncValue.data(AuthState.error(message: failure.displayMessage));
+        _streamController.add(AuthState.error(message: failure.displayMessage));
+        return false;
+      },
+      (_) => true,
     );
   }
 

@@ -11,6 +11,8 @@ class UserEntity with _$UserEntity {
     required String name,
     String? avatarUrl,
     required bool emailVerified,
+    @Default('USER') String role,
+    @Default(0) int creditBalance,
     required DateTime createdAt,
     SubscriptionInfo? subscription,
     UsageInfo? usage,

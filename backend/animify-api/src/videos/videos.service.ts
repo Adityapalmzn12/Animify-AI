@@ -3,13 +3,18 @@ import {
   Logger,
   NotFoundException,
   BadRequestException,
+  Optional,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
-import { AiStylizeService } from '../ai-providers/ai-stylize.service';
 import { resolveStyleProfile } from '../ai-providers/styles.config';
 import { CreateVideoJobDto } from './dto/create-video-job.dto';
 import { ConfigService } from '@nestjs/config';
+import { CreditsService } from '../credits/credits.service';
+import { QueueService } from '../queue/queue.service';
+import { JobType } from '@prisma/client';
 
 @Injectable()
 export class VideosService {
@@ -19,8 +24,31 @@ export class VideosService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly storageService: StorageService,
-    private readonly aiStylizeService: AiStylizeService,
+    private readonly creditsService: CreditsService,
+    @Optional() @Inject(forwardRef(() => QueueService))
+    private readonly queueService?: QueueService,
   ) {}
+
+  private creditCostFor(jobType: JobType): number {
+    const map: Record<string, string> = {
+      STYLIZE: 'credits.stylizeCost',
+      TEXT_TO_VIDEO: 'credits.textToVideoCost',
+      IMAGE_TO_VIDEO: 'credits.imageToVideoCost',
+      AVATAR: 'credits.avatarCost',
+      DUB: 'credits.dubCost',
+      SUBTITLE: 'credits.subtitleCost',
+      VOICE: 'credits.voiceCost',
+      SCRIPT: 'credits.scriptCost',
+      IMAGE_GEN: 'credits.imageGenCost',
+      BG_REMOVE: 'credits.bgRemoveCost',
+      EDIT_TRIM: 'credits.editCost',
+      EDIT_MERGE: 'credits.editCost',
+      EDIT_CROP: 'credits.editCost',
+      EDIT_FILTER: 'credits.editCost',
+      EDIT_EXPORT: 'credits.editCost',
+    };
+    return this.configService.get<number>(map[jobType] || 'credits.stylizeCost') ?? 5;
+  }
 
   async createVideoJob(userId: string, dto: CreateVideoJobDto) {
     const user = await this.prisma.user.findUnique({
@@ -32,15 +60,30 @@ export class VideosService {
       throw new NotFoundException('User not found');
     }
 
-    const inputFile = await this.prisma.videoFile.findUnique({
-      where: { id: dto.inputFileId },
-    });
-
-    if (!inputFile) {
-      throw new NotFoundException('Input file not found');
+    const jobType = dto.jobType || JobType.STYLIZE;
+    if (
+      (jobType === JobType.STYLIZE ||
+        jobType === JobType.IMAGE_TO_VIDEO ||
+        jobType === JobType.BG_REMOVE) &&
+      !dto.inputFileId
+    ) {
+      throw new BadRequestException('inputFileId is required for this job type');
     }
 
-    // templateId from the app may be a style slug (anime/cartoon), not a UUID.
+    if (dto.inputFileId) {
+      const inputFile = await this.prisma.videoFile.findUnique({
+        where: { id: dto.inputFileId },
+      });
+      if (!inputFile) throw new NotFoundException('Input file not found');
+    }
+
+    if (dto.projectId) {
+      const project = await this.prisma.project.findFirst({
+        where: { id: dto.projectId, userId },
+      });
+      if (!project) throw new NotFoundException('Project not found');
+    }
+
     let templateId: string | null = null;
     const styleSlug = dto.templateId || (dto.settings as any)?.style || 'anime';
     if (dto.templateId && this.isUuid(dto.templateId)) {
@@ -55,196 +98,71 @@ export class VideosService {
       ...(dto.settings || {}),
       style: profile.id,
       styleName: profile.name,
+      aspect: dto.settings?.aspect || '9:16',
+      duration: dto.settings?.duration || 5,
     };
 
-    const videoJob = await this.prisma.videoJob.create({
-      data: {
+    const creditsCost = this.creditCostFor(jobType);
+    await this.creditsService.debitCredits(
+      userId,
+      creditsCost,
+      undefined,
+      `${jobType} job`,
+    );
+
+    const provider = this.configService.get<string>('ai.provider') || 'oss';
+
+    try {
+      const videoJob = await this.prisma.videoJob.create({
+        data: {
+          userId,
+          inputFileId: dto.inputFileId || null,
+          templateId,
+          projectId: dto.projectId || null,
+          prompt: dto.prompt || null,
+          jobType,
+          provider,
+          creditsCost,
+          status: 'PENDING',
+          progress: 0,
+          currentStep: `Queued — ${profile.name}`,
+          settings,
+        },
+        include: {
+          template: true,
+          inputFile: true,
+          outputFile: true,
+        },
+      });
+
+      // Attach jobId to ledger entry via a follow-up debit note is skipped;
+      // re-link by updating last debit is optional. Enqueue:
+      if (this.queueService) {
+        const bullJob = await this.queueService.enqueueAiJob(videoJob.id);
+        await this.prisma.videoJob.update({
+          where: { id: videoJob.id },
+          data: { bullJobId: String(bullJob.id), status: 'QUEUED' },
+        });
+      } else {
+        this.logger.warn('QueueService unavailable — job left PENDING');
+      }
+
+      return this.formatVideoJob({ ...videoJob, status: 'QUEUED' });
+    } catch (error) {
+      await this.creditsService.refundCredits(
         userId,
-        inputFileId: dto.inputFileId,
-        templateId,
-        status: 'PENDING',
-        progress: 0,
-        currentStep: `Queued — ${profile.name}`,
-        settings,
-      },
-      include: {
-        template: true,
-        inputFile: true,
-        outputFile: true,
-      },
-    });
-
-    void this.runProcessingPipeline(videoJob.id);
-
-    return this.formatVideoJob(videoJob);
+        creditsCost,
+        undefined,
+        'Job create failed refund',
+      );
+      throw error;
+    }
   }
 
   private isUuid(value: string): boolean {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
       value,
     );
-  }
-
-  private async updateJobProgress(
-    jobId: string,
-    data: {
-      status?: 'PENDING' | 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
-      progress?: number;
-      currentStep?: string;
-      startedAt?: Date;
-    },
-  ) {
-    const current = await this.prisma.videoJob.findUnique({ where: { id: jobId } });
-    if (!current || current.status === 'CANCELLED') {
-      return false;
-    }
-    await this.prisma.videoJob.update({
-      where: { id: jobId },
-      data: {
-        ...data,
-        startedAt: data.startedAt ?? current.startedAt ?? new Date(),
-      },
-    });
-    return true;
-  }
-
-  private async runProcessingPipeline(jobId: string) {
-    try {
-      const job = await this.prisma.videoJob.findUnique({
-        where: { id: jobId },
-        include: { inputFile: true },
-      });
-
-      if (!job || !job.inputFile) {
-        return;
-      }
-
-      const settings = (job.settings || {}) as Record<string, any>;
-      const profile = resolveStyleProfile(settings.style);
-
-      if (!(await this.updateJobProgress(jobId, {
-        status: 'QUEUED',
-        progress: 5,
-        currentStep: `Queued — ${profile.name}`,
-      }))) {
-        return;
-      }
-
-      if (!(await this.updateJobProgress(jobId, {
-        status: 'PROCESSING',
-        progress: 15,
-        currentStep: 'Preparing source video',
-      }))) {
-        return;
-      }
-
-      const { downloadUrl: inputUrl } =
-        await this.storageService.getDownloadUrl(job.inputFile.storageKey);
-
-      if (!(await this.updateJobProgress(jobId, {
-        status: 'PROCESSING',
-        progress: 25,
-        currentStep: settings.removeBackground
-          ? 'BG remove'
-          : `Style Wan — ${profile.name}`,
-      }))) {
-        return;
-      }
-
-      const stylized = await this.aiStylizeService.stylizeVideo({
-        jobId,
-        videoUrl: inputUrl,
-        style: profile.id,
-        originalName: job.inputFile.originalName,
-        settings,
-        onProgress: async (progress, step) => {
-          await this.updateJobProgress(jobId, {
-            status: 'PROCESSING',
-            progress,
-            currentStep: step,
-          });
-        },
-      });
-
-      if (!(await this.updateJobProgress(jobId, {
-        status: 'PROCESSING',
-        progress: 90,
-        currentStep: 'Finalize',
-      }))) {
-        return;
-      }
-
-      const outputKey = this.storageService.buildStorageKey(
-        job.userId,
-        `out_${Date.now()}`,
-        stylized.fileName,
-      );
-
-      await this.storageService.uploadBuffer(
-        outputKey,
-        stylized.buffer,
-        stylized.mimeType,
-      );
-
-      if (!(await this.updateJobProgress(jobId, {
-        status: 'PROCESSING',
-        progress: 95,
-        currentStep: 'Saving animated video',
-      }))) {
-        return;
-      }
-
-      const { downloadUrl, expiresAt } =
-        await this.storageService.getDownloadUrl(outputKey);
-
-      const outputFile = await this.prisma.videoFile.create({
-        data: {
-          type: 'OUTPUT',
-          originalName: stylized.fileName,
-          mimeType: stylized.mimeType,
-          sizeBytes: BigInt(stylized.buffer.length),
-          storageKey: outputKey,
-          downloadUrl,
-          downloadUrlExpiresAt: expiresAt,
-          durationSeconds: job.inputFile.durationSeconds,
-          width: job.inputFile.width,
-          height: job.inputFile.height,
-        },
-      });
-
-      await this.prisma.videoJob.update({
-        where: { id: jobId },
-        data: {
-          status: 'COMPLETED',
-          progress: 100,
-          currentStep: `Completed — ${profile.name} (${stylized.engine || stylized.provider})`,
-          outputFileId: outputFile.id,
-          completedAt: new Date(),
-          settings: {
-            ...settings,
-            style: profile.id,
-            styleName: profile.name,
-            provider: stylized.provider,
-            engine: stylized.engine,
-          },
-        },
-      });
-
-      this.logger.log(
-        `Video job ${jobId} completed with style=${profile.id} provider=${stylized.provider} engine=${stylized.engine}`,
-      );
-    } catch (error) {
-      this.logger.error(`Video job ${jobId} failed`, error);
-      await this.prisma.videoJob.update({
-        where: { id: jobId },
-        data: {
-          status: 'FAILED',
-          currentStep: 'Failed',
-          errorMessage:
-            error instanceof Error ? error.message : 'Processing failed',
-        },
-      });
-    }
   }
 
   async getVideoJobs(userId: string, page = 1, limit = 10, status?: string) {
@@ -330,6 +248,8 @@ export class VideosService {
       throw new BadRequestException('Cannot cancel job in current status');
     }
 
+    await this.queueService?.cancelJob(jobId).catch(() => undefined);
+
     const updated = await this.prisma.videoJob.update({
       where: { id: jobId },
       data: { status: 'CANCELLED', currentStep: 'Cancelled' },
@@ -339,6 +259,15 @@ export class VideosService {
         outputFile: true,
       },
     });
+
+    if (job.creditsCost > 0) {
+      await this.creditsService.refundCredits(
+        userId,
+        job.creditsCost,
+        jobId,
+        'Job cancelled refund',
+      );
+    }
 
     return this.formatVideoJob(updated);
   }
@@ -459,6 +388,11 @@ export class VideosService {
 
     return {
       id: job.id,
+      jobType: job.jobType || 'STYLIZE',
+      provider: job.provider || 'oss',
+      creditsCost: job.creditsCost || 0,
+      projectId: job.projectId || null,
+      prompt: job.prompt || null,
       status: String(job.status).toLowerCase(),
       progress: job.progress || 0,
       currentStep: job.currentStep,
@@ -473,7 +407,9 @@ export class VideosService {
         outputQuality: settings.outputQuality ?? 'hd',
         style: profile.id,
         styleName,
-        provider: settings.provider,
+        aspect: settings.aspect,
+        duration: settings.duration,
+        provider: settings.provider || job.provider,
       },
       createdAt: job.createdAt.toISOString(),
       updatedAt: job.updatedAt?.toISOString?.() ?? job.updatedAt,

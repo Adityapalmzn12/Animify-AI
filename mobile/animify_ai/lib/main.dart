@@ -9,6 +9,7 @@ import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'firebase_options.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
+import 'core/l10n/app_localizations.dart';
 import 'features/auth/presentation/providers/auth_provider.dart';
 import 'features/settings/presentation/providers/theme_provider.dart';
 
@@ -68,6 +69,14 @@ class AnimifyApp extends ConsumerWidget {
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: themeMode,
+      locale: const Locale('en'),
+      supportedLocales: const [
+        Locale('en'),
+        Locale('hi'),
+      ],
+      localizationsDelegates: const [
+        AppLocalizationsDelegate(),
+      ],
       routerConfig: router,
       builder: (context, child) {
         return MediaQuery(

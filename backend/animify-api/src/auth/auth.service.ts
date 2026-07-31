@@ -16,6 +16,11 @@ import { GoogleAuthDto } from './dto/google-auth.dto';
 import { SendOtpDto } from './dto/send-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { randomUUID } from 'crypto';
+import { CreditsService } from '../credits/credits.service';
+import * as appleSignin from 'apple-signin-auth';
+import { AppleAuthDto } from './dto/apple-auth.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 @Injectable()
 export class AuthService {
@@ -26,6 +31,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly usersService: UsersService,
+    private readonly creditsService: CreditsService,
   ) {}
 
   async login(dto: LoginDto) {
@@ -91,13 +97,114 @@ export class AuthService {
       },
     });
 
+    const signupGrant = this.configService.get<number>('credits.signupGrant') ?? 50;
+    await this.creditsService.grantCredits(user.id, signupGrant, 'Signup bonus');
+
     const tokens = await this.generateTokens(user.id);
     await this.storeRefreshToken(user.id, tokens.refreshToken);
 
     return {
       ...tokens,
-      user: this.usersService.formatUser(user),
+      user: this.usersService.formatUser(
+        await this.prisma.user.findUniqueOrThrow({
+          where: { id: user.id },
+          include: { subscription: true },
+        }),
+      ),
     };
+  }
+
+  async appleAuth(dto: AppleAuthDto) {
+    const clientId = this.configService.get<string>('apple.clientId');
+    if (!clientId) {
+      throw new BadRequestException('Apple Sign-In is not configured');
+    }
+    let appleUser: { sub: string; email?: string };
+    try {
+      appleUser = await appleSignin.verifyIdToken(dto.identityToken, {
+        audience: clientId,
+        ignoreExpiration: false,
+      });
+    } catch {
+      throw new UnauthorizedException('Invalid Apple identity token');
+    }
+
+    let user = await this.prisma.user.findFirst({
+      where: {
+        OR: [
+          { appleId: appleUser.sub },
+          ...(appleUser.email ? [{ email: appleUser.email }] : []),
+        ],
+      },
+      include: { subscription: true },
+    });
+
+    if (!user) {
+      const freeTrialVideoLimit =
+        this.configService.get<number>('limits.freeTrialVideoLimit') ?? 3;
+      const email =
+        appleUser.email || `apple_${appleUser.sub}@privaterelay.appleid.com`;
+      user = await this.prisma.user.create({
+        data: {
+          email,
+          name: dto.fullName || 'Apple User',
+          appleId: appleUser.sub,
+          emailVerified: true,
+          subscription: {
+            create: {
+              planType: 'FREE_TRIAL',
+              status: 'ACTIVE',
+              startedAt: new Date(),
+              expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+              videoLimit: freeTrialVideoLimit,
+              minutesLimit: 0,
+            },
+          },
+        },
+        include: { subscription: true },
+      });
+      const signupGrant = this.configService.get<number>('credits.signupGrant') ?? 50;
+      await this.creditsService.grantCredits(user.id, signupGrant, 'Signup bonus');
+    } else if (!user.appleId) {
+      user = await this.prisma.user.update({
+        where: { id: user.id },
+        data: { appleId: appleUser.sub },
+        include: { subscription: true },
+      });
+    }
+
+    if (user.status !== 'ACTIVE') {
+      throw new UnauthorizedException('Your account has been suspended');
+    }
+
+    const tokens = await this.generateTokens(user.id);
+    await this.storeRefreshToken(user.id, tokens.refreshToken);
+    return { ...tokens, user: this.usersService.formatUser(user) };
+  }
+
+  async resetPassword(dto: ResetPasswordDto) {
+    const otp = await this.prisma.otpCode.findFirst({
+      where: {
+        email: dto.email.toLowerCase(),
+        purpose: 'PASSWORD_RESET',
+        verifiedAt: { not: null },
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!otp) {
+      throw new BadRequestException('Verify OTP before resetting password');
+    }
+    const passwordHash = await bcrypt.hash(dto.newPassword, 12);
+    const user = await this.prisma.user.update({
+      where: { email: dto.email.toLowerCase() },
+      data: { passwordHash },
+    });
+    await this.prisma.refreshToken.updateMany({
+      where: { userId: user.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    return { message: 'Password updated successfully' };
   }
 
   async googleAuth(dto: GoogleAuthDto) {
@@ -217,6 +324,14 @@ export class AuthService {
       data: { verifiedAt: new Date() },
     });
 
+    const purpose = dto.purpose.toUpperCase();
+    if (purpose === 'PASSWORD_RESET') {
+      return {
+        message: 'OTP verified. You may reset your password.',
+        verified: true,
+      };
+    }
+
     let user = await this.prisma.user.findUnique({
       where: { email: dto.email },
       include: { subscription: true },
@@ -271,27 +386,56 @@ export class AuthService {
       const payload = this.jwtService.verify(dto.refreshToken, {
         secret: this.configService.get<string>('jwt.secret') || 'default-secret',
       });
-
-      const storedToken = await this.prisma.refreshToken.findFirst({
-        where: {
-          userId: payload.sub,
-          revokedAt: null,
-          expiresAt: { gt: new Date() },
-        },
-      });
-
-      if (!storedToken) {
+      if (payload.type !== 'refresh') {
         throw new UnauthorizedException('Invalid refresh token');
       }
 
-      const accessToken = this.jwtService.sign({ sub: payload.sub });
-      const accessExpiry = this.configService.get<string>('jwt.accessExpiry') || '15m';
+      const candidates = await this.prisma.refreshToken.findMany({
+        where: {
+          userId: payload.sub,
+          expiresAt: { gt: new Date() },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      });
 
-      return {
-        accessToken,
-        expiresIn: this.getExpiryInSeconds(accessExpiry),
-      };
-    } catch {
+      let matched: (typeof candidates)[0] | null = null;
+      for (const row of candidates) {
+        if (await bcrypt.compare(dto.refreshToken, row.tokenHash)) {
+          matched = row;
+          break;
+        }
+      }
+
+      if (!matched) {
+        throw new UnauthorizedException('Invalid refresh token');
+      }
+
+      // Reuse detection: revoked token presented again → kill family
+      if (matched.revokedAt) {
+        await this.prisma.refreshToken.updateMany({
+          where: { familyId: matched.familyId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+        throw new UnauthorizedException('Refresh token reuse detected');
+      }
+
+      const tokens = await this.generateTokens(payload.sub);
+      const newHash = await bcrypt.hash(tokens.refreshToken, 10);
+      await this.prisma.refreshToken.update({
+        where: { id: matched.id },
+        data: { revokedAt: new Date(), replacedByHash: newHash },
+      });
+      await this.storeRefreshToken(
+        payload.sub,
+        tokens.refreshToken,
+        matched.deviceInfo || undefined,
+        matched.familyId,
+      );
+
+      return tokens;
+    } catch (e) {
+      if (e instanceof UnauthorizedException) throw e;
       throw new UnauthorizedException('Invalid refresh token');
     }
   }
@@ -329,6 +473,7 @@ export class AuthService {
     userId: string,
     token: string,
     deviceInfo?: string,
+    familyId?: string,
   ) {
     const tokenHash = await bcrypt.hash(token, 10);
     const refreshExpiry = this.configService.get<string>('jwt.refreshExpiry') || '7d';
@@ -340,6 +485,7 @@ export class AuthService {
       data: {
         userId,
         tokenHash,
+        familyId: familyId || randomUUID(),
         deviceInfo,
         expiresAt,
       },

@@ -1,10 +1,31 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../../core/l10n/app_localizations.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
+
+const _biometricLockKey = 'require_biometric_lock';
+
+final biometricLockProvider =
+    StateNotifierProvider<BiometricLockNotifier, bool>((ref) {
+  return BiometricLockNotifier(ref.watch(sharedPreferencesProvider));
+});
+
+class BiometricLockNotifier extends StateNotifier<bool> {
+  final SharedPreferences _prefs;
+
+  BiometricLockNotifier(this._prefs)
+      : super(_prefs.getBool(_biometricLockKey) ?? false);
+
+  Future<void> setEnabled(bool value) async {
+    await _prefs.setBool(_biometricLockKey, value);
+    state = value;
+  }
+}
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -12,6 +33,9 @@ class SettingsPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeProvider);
+    final l10n = AppLocalizations.of(context);
+    final user = ref.watch(currentUserProvider);
+    final biometricEnabled = ref.watch(biometricLockProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -31,6 +55,19 @@ class SettingsPage extends ConsumerWidget {
               ),
               _buildTile(
                 context,
+                icon: Icons.account_balance_wallet_outlined,
+                title: l10n.wallet,
+                subtitle: '${user?.creditBalance ?? 0} ${l10n.credits}',
+                onTap: () => context.push(AppRoutes.wallet),
+              ),
+              _buildTile(
+                context,
+                icon: Icons.folder_open_outlined,
+                title: l10n.projects,
+                onTap: () => context.go(AppRoutes.projects),
+              ),
+              _buildTile(
+                context,
                 icon: Icons.credit_card_outlined,
                 title: 'Subscription',
                 onTap: () => context.go(AppRoutes.subscription),
@@ -40,6 +77,30 @@ class SettingsPage extends ConsumerWidget {
                 icon: Icons.notifications_outlined,
                 title: 'Notifications',
                 onTap: () => context.push(AppRoutes.notifications),
+              ),
+              if (user?.role == 'ADMIN')
+                _buildTile(
+                  context,
+                  icon: Icons.admin_panel_settings_outlined,
+                  title: l10n.admin,
+                  onTap: () => context.push(AppRoutes.adminDashboard),
+                ),
+            ],
+          ),
+          _buildSection(
+            context,
+            'Security',
+            [
+              SwitchListTile(
+                secondary: const Icon(Icons.fingerprint),
+                title: const Text('Require biometric'),
+                subtitle: const Text(
+                  'Lock app with Face ID / fingerprint (local preference stub)',
+                ),
+                value: biometricEnabled,
+                onChanged: (value) {
+                  ref.read(biometricLockProvider.notifier).setEnabled(value);
+                },
               ),
             ],
           ),
@@ -109,7 +170,7 @@ class SettingsPage extends ConsumerWidget {
             padding: const EdgeInsets.all(24),
             child: Center(
               child: Text(
-                'Animify AI v1.0.0',
+                '${l10n.appTitle} v1.0.0',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),

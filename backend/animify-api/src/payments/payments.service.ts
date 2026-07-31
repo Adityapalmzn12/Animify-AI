@@ -1,0 +1,357 @@
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import Stripe from 'stripe';
+import {
+  PaymentProvider,
+  PaymentStatus,
+  PlanType,
+  SubscriptionStatus,
+} from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
+import { CreditsService } from '../credits/credits.service';
+import { CheckoutDto, PromoDto, WalletTopupDto } from './dto/payments.dto';
+
+@Injectable()
+export class PaymentsService {
+  private readonly logger = new Logger(PaymentsService.name);
+  private stripe: Stripe | null = null;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+    private readonly credits: CreditsService,
+  ) {
+    const secretKey = this.config.get<string>('payment.stripe.secretKey');
+    if (secretKey) {
+      this.stripe = new Stripe(secretKey);
+    }
+  }
+
+  private requireStripe(): Stripe {
+    if (!this.stripe) {
+      throw new BadRequestException('Stripe is not configured');
+    }
+    return this.stripe;
+  }
+
+  async createCheckoutSession(userId: string, dto: CheckoutDto) {
+    const stripe = this.requireStripe();
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+
+    let customerId = (
+      await this.prisma.subscription.findUnique({ where: { userId } })
+    )?.stripeCustomerId;
+
+    if (!customerId) {
+      const customer = await stripe.customers.create({
+        email: user.email,
+        name: user.name,
+        metadata: { userId },
+      });
+      customerId = customer.id;
+      await this.prisma.subscription.upsert({
+        where: { userId },
+        create: {
+          userId,
+          planType: PlanType.FREE_TRIAL,
+          status: SubscriptionStatus.ACTIVE,
+          startedAt: new Date(),
+          expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+          videoLimit: this.config.get<number>('limits.freeTrialVideoLimit') ?? 3,
+          minutesLimit: 0,
+          stripeCustomerId: customerId,
+        },
+        update: { stripeCustomerId: customerId },
+      });
+    }
+
+    const priceId = this.config.get<string>('payment.stripe.priceId');
+    const successUrl =
+      dto.successUrl ||
+      this.config.get<string>('payment.stripe.successUrl') ||
+      'https://animify.ai/billing/success';
+    const cancelUrl =
+      dto.cancelUrl ||
+      this.config.get<string>('payment.stripe.cancelUrl') ||
+      'https://animify.ai/billing/cancel';
+
+    const sessionParams: Stripe.Checkout.SessionCreateParams = {
+      customer: customerId,
+      mode: priceId ? 'subscription' : 'payment',
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      metadata: { userId },
+    };
+
+    if (priceId) {
+      sessionParams.line_items = [{ price: priceId, quantity: 1 }];
+    } else {
+      const amount = this.config.get<number>('limits.premiumPriceInr') ?? 49;
+      sessionParams.line_items = [
+        {
+          price_data: {
+            currency: 'inr',
+            product_data: { name: 'Animify Premium' },
+            unit_amount: amount * 100,
+            recurring: { interval: 'month' },
+          },
+          quantity: 1,
+        },
+      ];
+    }
+
+    const session = await stripe.checkout.sessions.create(sessionParams);
+    return { url: session.url, sessionId: session.id };
+  }
+
+  async createPortalSession(userId: string) {
+    const stripe = this.requireStripe();
+    const sub = await this.prisma.subscription.findUnique({ where: { userId } });
+    if (!sub?.stripeCustomerId) {
+      throw new BadRequestException('No billing account found');
+    }
+    const session = await stripe.billingPortal.sessions.create({
+      customer: sub.stripeCustomerId,
+      return_url:
+        this.config.get<string>('payment.stripe.portalReturnUrl') ||
+        'https://animify.ai/billing',
+    });
+    return { url: session.url };
+  }
+
+  async handleStripeWebhook(rawBody: Buffer, signature: string) {
+    const stripe = this.requireStripe();
+    const webhookSecret = this.config.get<string>('payment.stripe.webhookSecret');
+    if (!webhookSecret) {
+      throw new BadRequestException('Stripe webhook secret not configured');
+    }
+
+    let event: Stripe.Event;
+    try {
+      event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Invalid signature';
+      throw new BadRequestException(`Webhook error: ${message}`);
+    }
+
+    if (event.type === 'checkout.session.completed') {
+      const session = event.data.object as Stripe.Checkout.Session;
+      await this.onCheckoutCompleted(session);
+    }
+
+    return { received: true };
+  }
+
+  private async onCheckoutCompleted(session: Stripe.Checkout.Session) {
+    const userId = session.metadata?.userId;
+    if (!userId) {
+      this.logger.warn('Checkout session missing userId metadata');
+      return;
+    }
+
+    if (session.metadata?.type === 'wallet_topup') {
+      const credits = parseInt(session.metadata.credits || '0', 10);
+      if (credits > 0) {
+        await this.credits.grantCredits(
+          userId,
+          credits,
+          'Wallet top-up',
+          'PURCHASE',
+          { sessionId: session.id },
+        );
+      }
+      await this.prisma.payment.updateMany({
+        where: { providerId: session.id },
+        data: { status: PaymentStatus.COMPLETED },
+      });
+      return;
+    }
+
+    const premiumGrant =
+      this.config.get<number>('credits.premiumMonthlyGrant') ?? 500;
+    const videoLimit = this.config.get<number>('limits.premiumVideoLimit') ?? 45;
+    const minutesLimit =
+      this.config.get<number>('limits.premiumMinutesLimit') ?? 450;
+
+    const expiresAt = new Date();
+    expiresAt.setMonth(expiresAt.getMonth() + 1);
+
+    await this.prisma.subscription.upsert({
+      where: { userId },
+      create: {
+        userId,
+        planType: PlanType.PREMIUM,
+        status: SubscriptionStatus.ACTIVE,
+        startedAt: new Date(),
+        expiresAt,
+        videoLimit,
+        minutesLimit,
+        autoRenew: true,
+        stripeCustomerId:
+          typeof session.customer === 'string' ? session.customer : null,
+        stripeSubId:
+          typeof session.subscription === 'string'
+            ? session.subscription
+            : null,
+      },
+      update: {
+        planType: PlanType.PREMIUM,
+        status: SubscriptionStatus.ACTIVE,
+        expiresAt,
+        videoLimit,
+        minutesLimit,
+        stripeSubId:
+          typeof session.subscription === 'string'
+            ? session.subscription
+            : undefined,
+      },
+    });
+
+    await this.credits.grantCredits(
+      userId,
+      premiumGrant,
+      'Premium subscription grant',
+      'GRANT',
+      { source: 'stripe_checkout', sessionId: session.id },
+    );
+
+    const amount = (session.amount_total ?? 0) / 100;
+    await this.prisma.payment.create({
+      data: {
+        userId,
+        amount,
+        currency: (session.currency || 'inr').toUpperCase(),
+        status: PaymentStatus.COMPLETED,
+        provider: PaymentProvider.STRIPE,
+        providerId: session.id,
+        metadata: { mode: session.mode },
+      },
+    });
+  }
+
+  async applyPromo(userId: string, dto: PromoDto) {
+    const coupon = await this.prisma.coupon.findUnique({
+      where: { code: dto.code.toUpperCase() },
+    });
+    if (!coupon || !coupon.isActive) {
+      throw new NotFoundException('Invalid promo code');
+    }
+    const now = new Date();
+    if (now < coupon.validFrom || now > coupon.validUntil) {
+      throw new BadRequestException('Promo code expired');
+    }
+    if (coupon.maxUses != null && coupon.usedCount >= coupon.maxUses) {
+      throw new BadRequestException('Promo code usage limit reached');
+    }
+
+    await this.prisma.coupon.update({
+      where: { id: coupon.id },
+      data: { usedCount: { increment: 1 } },
+    });
+
+    if (coupon.creditGrant > 0) {
+      await this.credits.grantCredits(
+        userId,
+        coupon.creditGrant,
+        `Promo: ${coupon.code}`,
+        'PROMO',
+        { couponId: coupon.id },
+      );
+    }
+
+    return {
+      code: coupon.code,
+      creditGrant: coupon.creditGrant,
+      discountType: coupon.discountType,
+      discountValue: Number(coupon.discountValue),
+    };
+  }
+
+  async walletTopup(userId: string, dto: WalletTopupDto) {
+    const stripe = this.requireStripe();
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    const successUrl =
+      dto.successUrl ||
+      this.config.get<string>('payment.stripe.successUrl') ||
+      'https://animify.ai/billing/success';
+    const cancelUrl =
+      dto.cancelUrl ||
+      this.config.get<string>('payment.stripe.cancelUrl') ||
+      'https://animify.ai/billing/cancel';
+
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      customer_email: user.email,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      metadata: {
+        userId,
+        type: 'wallet_topup',
+        credits: String(dto.credits),
+      },
+      line_items: [
+        {
+          price_data: {
+            currency: 'inr',
+            product_data: { name: `${dto.credits} Animify Credits` },
+            unit_amount: dto.credits * 100,
+          },
+          quantity: 1,
+        },
+      ],
+    });
+
+    await this.prisma.payment.create({
+      data: {
+        userId,
+        amount: dto.credits,
+        currency: 'INR',
+        status: PaymentStatus.PENDING,
+        provider: PaymentProvider.STRIPE,
+        providerId: session.id,
+        metadata: { type: 'wallet_topup', credits: dto.credits },
+      },
+    });
+
+    return { url: session.url, sessionId: session.id };
+  }
+
+  async listInvoices(userId: string, page = 1, limit = 20) {
+    const skip = (page - 1) * limit;
+    const where = { userId };
+    const [items, total] = await Promise.all([
+      this.prisma.payment.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.payment.count({ where }),
+    ]);
+    return {
+      items: items.map((p) => ({
+        ...p,
+        amount: Number(p.amount),
+      })),
+      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  /** Razorpay integration placeholder for future use. */
+  async createRazorpayOrder(_userId: string, _amountInr: number) {
+    const keyId = this.config.get<string>('payment.razorpay.keyId');
+    if (!keyId) {
+      throw new BadRequestException('Razorpay is not configured');
+    }
+    return {
+      provider: PaymentProvider.RAZORPAY,
+      status: 'not_implemented',
+      message: 'Razorpay checkout will be enabled in a future release',
+    };
+  }
+}

@@ -7,6 +7,7 @@ import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { LocalStrategy } from './strategies/local.strategy';
 import { UsersModule } from '../users/users.module';
+import { CreditsModule } from '../credits/credits.module';
 
 function parseExpiryToSeconds(expiry: string): number {
   const match = expiry.match(/^(\d+)(m|h|d)$/);
@@ -26,6 +27,7 @@ function parseExpiryToSeconds(expiry: string): number {
 @Module({
   imports: [
     UsersModule,
+    CreditsModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],

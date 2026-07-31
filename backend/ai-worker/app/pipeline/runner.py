@@ -20,6 +20,7 @@ from app.pipeline.styles import (
     FFMPEG_STYLE_FILTERS,
     STYLE_NEGATIVE,
     WORKFLOW_FILES,
+    cpu_style_filter,
     prompt_for,
 )
 from app.schemas import JobSettings, StyleId
@@ -28,12 +29,15 @@ logger = logging.getLogger(__name__)
 
 ProgressCb = Callable[[int, str], None]
 
+# Skip heavy frame extraction when input is large (phone HEVC often OOMs).
+MAX_BYTES_FOR_FRAME_PIPELINE = int(
+    os.environ.get("MAX_BYTES_FOR_FRAME_PIPELINE", str(12 * 1024 * 1024))
+)
+
 
 def detect_gpu() -> bool:
-    # NVIDIA
     if shutil.which("nvidia-smi"):
         return True
-    # Apple Metal / CUDA env hints
     if os.environ.get("CUDA_VISIBLE_DEVICES", "") not in ("", "-1"):
         return True
     return False
@@ -60,42 +64,40 @@ def run_pipeline(
 
     try:
         progress(5, "Preparing")
-        raw = work / "input_raw"
-        # extension from URL if possible
-        suffix = ".mp4"
-        if ".mov" in video_url.lower():
-            suffix = ".mov"
-        raw = raw.with_suffix(suffix)
+        suffix = ".mov" if ".mov" in video_url.lower() else ".mp4"
+        raw = (work / "input_raw").with_suffix(suffix)
         ffmpeg_ops.download_file_sync(video_url, raw)
-
-        progress(15, "Normalizing")
-        normalized = work / "normalized.mp4"
-        ffmpeg_ops.normalize_video(raw, normalized)
+        input_size = raw.stat().st_size
 
         use_gpu = cfg.prefer_gpu and detect_gpu()
         comfy = ComfyUIClient(cfg.comfyui_url)
         comfy_ok = use_gpu and comfy.is_available()
 
-        current = normalized
-
-        # Optional CPU MediaPipe steps (also useful before GPU stylize)
-        if settings.remove_background or settings.enhance_face:
-            progress(25, "BG remove" if settings.remove_background else "Face enhance")
-            frames_dir = work / "frames"
-            fps = 8.0 if settings.quality != "fhd" else 12.0
-            ffmpeg_ops.extract_frames(current, frames_dir, fps=fps)
-            if settings.remove_background:
-                mediapipe_ops.soft_background_blur(frames_dir)
-            if settings.enhance_face:
-                progress(35, "Face enhance")
-                mediapipe_ops.enhance_faces_in_frames(frames_dir)
-            pre = work / "preprocessed.mp4"
-            ffmpeg_ops.frames_to_video(frames_dir, pre, fps=fps, audio_source=normalized)
-            current = pre
-
+        style_vf, use_complex = cpu_style_filter(style)
+        simple_vf = FFMPEG_STYLE_FILTERS[style]
         styled = work / "styled.mp4"
+        engine = "cpu-ffmpeg"
 
         if comfy_ok:
+            progress(15, "Normalizing")
+            normalized = work / "normalized.mp4"
+            ffmpeg_ops.normalize_video(raw, normalized)
+            current = normalized
+
+            if (settings.remove_background or settings.enhance_face) and input_size <= MAX_BYTES_FOR_FRAME_PIPELINE:
+                progress(25, "BG remove" if settings.remove_background else "Face enhance")
+                frames_dir = work / "frames"
+                fps = 6.0
+                ffmpeg_ops.extract_frames(current, frames_dir, fps=fps)
+                if settings.remove_background:
+                    mediapipe_ops.soft_background_blur(frames_dir)
+                if settings.enhance_face:
+                    progress(35, "Face enhance")
+                    mediapipe_ops.enhance_faces_in_frames(frames_dir)
+                pre = work / "preprocessed.mp4"
+                ffmpeg_ops.frames_to_video(frames_dir, pre, fps=fps, audio_source=normalized)
+                current = pre
+
             progress(45, "Style Wan")
             try:
                 styled = _run_comfy_wan(
@@ -105,35 +107,61 @@ def run_pipeline(
                     work=work,
                     cfg=cfg,
                 )
+                engine = "wan"
             except Exception as exc:
                 logger.warning("ComfyUI/Wan failed, falling back to CPU: %s", exc)
-                progress(50, "Style CPU fallback")
-                styled = _run_cpu_style(current, styled, style, settings.preserve_audio)
+                progress(50, f"Style {style.value}")
+                ffmpeg_ops.stylize_one_pass(
+                    current,
+                    styled,
+                    style_vf,
+                    preserve_audio=settings.preserve_audio,
+                    use_filter_complex=use_complex,
+                    simple_vf=simple_vf,
+                )
         else:
-            progress(45, "Style CPU")
-            styled = _run_cpu_style(current, styled, style, settings.preserve_audio)
+            # One-pass CPU stylize: decode HEVC once (critical for phone videos on free tier).
+            progress(20, "Normalizing")
+            # Light normalize only when optional frame steps are needed and file is small
+            if (settings.remove_background or settings.enhance_face) and input_size <= MAX_BYTES_FOR_FRAME_PIPELINE:
+                normalized = work / "normalized.mp4"
+                ffmpeg_ops.normalize_video(raw, normalized)
+                progress(30, "BG remove" if settings.remove_background else "Face enhance")
+                frames_dir = work / "frames"
+                ffmpeg_ops.extract_frames(normalized, frames_dir, fps=6.0)
+                if settings.remove_background:
+                    mediapipe_ops.soft_background_blur(frames_dir)
+                if settings.enhance_face:
+                    mediapipe_ops.enhance_faces_in_frames(frames_dir)
+                pre = work / "preprocessed.mp4"
+                ffmpeg_ops.frames_to_video(frames_dir, pre, fps=6.0, audio_source=normalized)
+                progress(50, f"Style {style.value}")
+                ffmpeg_ops.stylize_one_pass(
+                    pre,
+                    styled,
+                    style_vf,
+                    preserve_audio=settings.preserve_audio,
+                    use_filter_complex=use_complex,
+                    simple_vf=simple_vf,
+                )
+            else:
+                progress(35, f"Style {style.value}")
+                ffmpeg_ops.stylize_one_pass(
+                    raw,
+                    styled,
+                    style_vf,
+                    preserve_audio=settings.preserve_audio,
+                    use_filter_complex=use_complex,
+                    simple_vf=simple_vf,
+                )
 
         progress(85, "Finalize")
         final = work / "final.mp4"
-        if settings.preserve_audio:
-            try:
-                ffmpeg_ops.mux_audio(styled, normalized, final)
-            except Exception:
-                shutil.copy(styled, final)
+        if settings.preserve_audio and styled.exists():
+            # Audio already muxed in one-pass when present; copy as final
+            shutil.copy(styled, final)
         else:
             shutil.copy(styled, final)
-
-        # Quality bump via ffmpeg scale for fhd
-        if settings.quality == "fhd":
-            progress(90, "Upscale")
-            upscaled = work / "final_fhd.mp4"
-            ffmpeg_ops.apply_style_filter(
-                final,
-                upscaled,
-                "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2",
-                preserve_audio=True,
-            )
-            final = upscaled
 
         progress(95, "Upload")
         object_key = output_path or f"outputs/{job_id}/styled.mp4"
@@ -149,22 +177,15 @@ def run_pipeline(
         return {
             "outputUrl": output_url,
             "outputPath": object_key,
-            "engine": "wan" if comfy_ok else "cpu-ffmpeg",
+            "engine": engine,
             "style": style.value,
         }
     finally:
-        # keep artifacts briefly for debug; wipe on success path optional
-        pass
-
-
-def _run_cpu_style(
-    input_path: Path,
-    output_path: Path,
-    style: StyleId,
-    preserve_audio: bool,
-) -> Path:
-    vf = FFMPEG_STYLE_FILTERS[style]
-    return ffmpeg_ops.apply_style_filter(input_path, output_path, vf, preserve_audio)
+        # Best-effort cleanup to free container disk
+        try:
+            shutil.rmtree(work, ignore_errors=True)
+        except Exception:
+            pass
 
 
 def _run_comfy_wan(
@@ -175,7 +196,6 @@ def _run_comfy_wan(
     work: Path,
     cfg: Settings,
 ) -> Path:
-    # pipeline -> app -> ai-worker
     workflows_dir = Path(__file__).resolve().parents[2] / "workflows"
     wf_name = WORKFLOW_FILES[style]
     wf_path = workflows_dir / wf_name
@@ -199,8 +219,12 @@ def _run_comfy_wan(
     filename, subfolder, folder_type = comfy.first_video_or_image_from_history(history)
 
     out = work / "comfy_out.mp4"
-    # If still image sequence exported as gif/webp, we still download and re-encode if needed
-    downloaded = comfy.download_output_file(filename, out if filename.endswith(".mp4") else work / filename, subfolder, folder_type)
+    downloaded = comfy.download_output_file(
+        filename,
+        out if filename.endswith(".mp4") else work / filename,
+        subfolder,
+        folder_type,
+    )
     if downloaded.suffix.lower() != ".mp4":
         ffmpeg_ops.normalize_video(downloaded, out)
         return out

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/router/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/app_button.dart';
 import '../../domain/entities/user_entity.dart';
@@ -76,7 +77,7 @@ class _OtpVerificationPageState extends ConsumerState<OtpVerificationPage> {
       _focusNodes[index + 1].requestFocus();
     }
     
-    if (_isOtpComplete) {
+    if (_isOtpComplete && widget.purpose != 'password_reset') {
       _verifyOtp();
     }
   }
@@ -92,6 +93,19 @@ class _OtpVerificationPageState extends ConsumerState<OtpVerificationPage> {
 
   Future<void> _verifyOtp() async {
     if (!_isOtpComplete) return;
+
+    if (widget.purpose == 'password_reset') {
+      if (mounted) {
+        context.push(
+          AppRoutes.resetPassword,
+          extra: {
+            'email': widget.email,
+            'otp': _otp,
+          },
+        );
+      }
+      return;
+    }
 
     await ref.read(authStateProvider.notifier).verifyOtp(
           email: widget.email,

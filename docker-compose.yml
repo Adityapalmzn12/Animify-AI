@@ -53,9 +53,13 @@ services:
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
       SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:-}
-      SUPABASE_STORAGE_BUCKET: ${SUPABASE_STORAGE_BUCKET:-animify-videos}
-    ports:
-      - "3000:3000"
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      CREDITS_SIGNUP_GRANT: ${CREDITS_SIGNUP_GRANT:-50}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      FAL_API_KEY: ${FAL_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-supabase}
     depends_on:
       postgres:
         condition: service_healthy

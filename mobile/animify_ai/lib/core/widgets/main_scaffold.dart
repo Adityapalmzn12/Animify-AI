@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../l10n/app_localizations.dart';
 import '../router/app_router.dart';
 import '../theme/app_colors.dart';
 
@@ -26,8 +27,8 @@ class _BottomNavBar extends StatelessWidget {
     
     if (location.startsWith(AppRoutes.dashboard)) return 0;
     if (location.startsWith(AppRoutes.videos)) return 1;
-    if (location.startsWith(AppRoutes.templates)) return 2;
-    if (location.startsWith(AppRoutes.subscription)) return 3;
+    if (location.startsWith(AppRoutes.generator)) return 2;
+    if (location.startsWith(AppRoutes.projects)) return 3;
     if (location.startsWith(AppRoutes.settings)) return 4;
     
     return 0;
@@ -42,10 +43,10 @@ class _BottomNavBar extends StatelessWidget {
         context.go(AppRoutes.videos);
         break;
       case 2:
-        context.go(AppRoutes.templates);
+        context.go(AppRoutes.generator);
         break;
       case 3:
-        context.go(AppRoutes.subscription);
+        context.go(AppRoutes.projects);
         break;
       case 4:
         context.go(AppRoutes.settings);
@@ -56,8 +57,8 @@ class _BottomNavBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final currentIndex = _getCurrentIndex(context);
+    final l10n = AppLocalizations.of(context);
     final colorScheme = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
       decoration: BoxDecoration(
@@ -71,7 +72,7 @@ class _BottomNavBar extends StatelessWidget {
       ),
       child: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
@@ -89,15 +90,16 @@ class _BottomNavBar extends StatelessWidget {
                 isSelected: currentIndex == 1,
                 onTap: () => _onTap(context, 1),
               ),
-              _UploadButton(
-                onTap: () => context.push(AppRoutes.videoUpload),
+              _GenerateButton(
+                isSelected: currentIndex == 2,
+                onTap: () => context.go(AppRoutes.generator),
               ),
               _NavItem(
-                icon: Icons.style_outlined,
-                activeIcon: Icons.style,
-                label: 'Templates',
-                isSelected: currentIndex == 2,
-                onTap: () => _onTap(context, 2),
+                icon: Icons.folder_open_outlined,
+                activeIcon: Icons.folder,
+                label: l10n.projects,
+                isSelected: currentIndex == 3,
+                onTap: () => _onTap(context, 3),
               ),
               _NavItem(
                 icon: Icons.settings_outlined,
@@ -137,7 +139,7 @@ class _NavItem extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -165,34 +167,56 @@ class _NavItem extends StatelessWidget {
   }
 }
 
-class _UploadButton extends StatelessWidget {
+class _GenerateButton extends StatelessWidget {
+  final bool isSelected;
   final VoidCallback onTap;
 
-  const _UploadButton({required this.onTap});
+  const _GenerateButton({
+    required this.isSelected,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    final l10n = AppLocalizations.of(context);
+
+    return InkWell(
       onTap: onTap,
-      child: Container(
-        width: 56,
-        height: 56,
-        decoration: BoxDecoration(
-          gradient: AppColors.primaryGradient,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.primary.withValues(alpha: 0.3),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
+      borderRadius: BorderRadius.circular(16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              gradient: AppColors.primaryGradient,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.primary.withValues(alpha: 0.3),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
+                ),
+              ],
             ),
-          ],
-        ),
-        child: const Icon(
-          Icons.add,
-          color: Colors.white,
-          size: 28,
-        ),
+            child: const Icon(
+              Icons.auto_awesome,
+              color: Colors.white,
+              size: 24,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            l10n.generate,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: isSelected
+                      ? Theme.of(context).colorScheme.primary
+                      : Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                ),
+          ),
+        ],
       ),
     );
   }

@@ -72,6 +72,10 @@ abstract class ApiEndpoints {
   static const String notifications = '/notifications';
   static const String admin = '/admin';
   
+  static const String projects = '/projects';
+  static const String generator = '/generator';
+  static const String credits = '/credits';
+  
   static const String login = '$auth/login';
   static const String register = '$auth/register';
   static const String googleAuth = '$auth/google';
@@ -83,6 +87,13 @@ abstract class ApiEndpoints {
   static const String resetPassword = '$auth/reset-password';
   
   static const String me = '$users/me';
+  
+  static const String projectsList = projects;
+  static const String creditsBalance = '$credits/balance';
+  static const String creditsLedger = '$credits/ledger';
+  static const String creditsPromo = '$credits/promo';
+  static const String generatorJobs = generator;
+  static const String adminMetrics = '$admin/metrics';
   
   static const String videoUploadUrl = '$videos/upload-url';
   static const String videoJobs = '$videos/jobs';

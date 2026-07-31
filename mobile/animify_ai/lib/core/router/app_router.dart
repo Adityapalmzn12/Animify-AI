@@ -8,6 +8,7 @@ import '../../features/auth/presentation/pages/login_page.dart';
 import '../../features/auth/presentation/pages/register_page.dart';
 import '../../features/auth/presentation/pages/otp_verification_page.dart';
 import '../../features/auth/presentation/pages/forgot_password_page.dart';
+import '../../features/auth/presentation/pages/reset_password_page.dart';
 import '../../features/auth/presentation/providers/auth_provider.dart';
 import '../../features/dashboard/presentation/pages/dashboard_page.dart';
 import '../../features/videos/presentation/pages/videos_page.dart';
@@ -18,6 +19,16 @@ import '../../features/subscription/presentation/pages/subscription_page.dart';
 import '../../features/settings/presentation/pages/settings_page.dart';
 import '../../features/profile/presentation/pages/profile_page.dart';
 import '../../features/notifications/presentation/pages/notifications_page.dart';
+import '../../features/projects/presentation/pages/projects_page.dart';
+import '../../features/projects/presentation/pages/project_detail_page.dart';
+import '../../features/generator/presentation/pages/generator_hub_page.dart';
+import '../../features/generator/presentation/pages/text_to_video_page.dart';
+import '../../features/generator/presentation/pages/image_to_video_page.dart';
+import '../../features/generator/presentation/pages/creative_studio_page.dart';
+import '../../features/generator/presentation/pages/image_gen_page.dart';
+import '../../features/generator/presentation/pages/script_writer_page.dart';
+import '../../features/wallet/presentation/pages/wallet_page.dart';
+import '../../features/admin/presentation/pages/admin_dashboard_page.dart';
 import '../widgets/main_scaffold.dart';
 
 abstract class AppRoutes {
@@ -28,6 +39,7 @@ abstract class AppRoutes {
   static const String register = '/register';
   static const String forgotPassword = '/forgot-password';
   static const String otpVerification = '/otp-verification';
+  static const String resetPassword = '/reset-password';
   
   static const String dashboard = '/dashboard';
   static const String videos = '/videos';
@@ -38,6 +50,16 @@ abstract class AppRoutes {
   static const String settings = '/settings';
   static const String profile = '/profile';
   static const String notifications = '/notifications';
+
+  static const String projects = '/projects';
+  static const String projectDetail = '/projects/:id';
+  static const String generator = '/generator';
+  static const String generatorTextToVideo = '/generator/text-to-video';
+  static const String generatorImageToVideo = '/generator/image-to-video';
+  static const String creativeStudio = '/generator/studio';
+  static const String imageGen = '/generator/image';
+  static const String scriptWriter = '/generator/script';
+  static const String wallet = '/wallet';
   
   static const String admin = '/admin';
   static const String adminDashboard = '/admin/dashboard';
@@ -58,6 +80,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       final isAuthRoute = state.matchedLocation == AppRoutes.login ||
           state.matchedLocation == AppRoutes.register ||
           state.matchedLocation == AppRoutes.forgotPassword ||
+          state.matchedLocation == AppRoutes.resetPassword ||
           state.matchedLocation.startsWith(AppRoutes.otpVerification);
 
       if (!isLoggedIn && !isAuthRoute) {
@@ -94,6 +117,17 @@ final routerProvider = Provider<GoRouter>((ref) {
           return OtpVerificationPage(
             email: extra?['email'] ?? '',
             purpose: extra?['purpose'] ?? 'login',
+          );
+        },
+      ),
+      GoRoute(
+        path: AppRoutes.resetPassword,
+        name: 'resetPassword',
+        builder: (context, state) {
+          final extra = state.extra as Map<String, dynamic>?;
+          return ResetPasswordPage(
+            email: extra?['email'] ?? '',
+            otp: extra?['otp'] ?? '',
           );
         },
       ),
@@ -149,6 +183,61 @@ final routerProvider = Provider<GoRouter>((ref) {
               child: const SettingsPage(),
             ),
           ),
+          GoRoute(
+            path: AppRoutes.projects,
+            name: 'projects',
+            pageBuilder: (context, state) => NoTransitionPage(
+              child: const ProjectsPage(),
+            ),
+            routes: [
+              GoRoute(
+                path: ':id',
+                name: 'projectDetail',
+                builder: (context, state) => ProjectDetailPage(
+                  projectId: state.pathParameters['id']!,
+                ),
+              ),
+            ],
+          ),
+          GoRoute(
+            path: AppRoutes.generator,
+            name: 'generator',
+            pageBuilder: (context, state) => NoTransitionPage(
+              child: const GeneratorHubPage(),
+            ),
+            routes: [
+              GoRoute(
+                path: 'text-to-video',
+                name: 'generatorTextToVideo',
+                builder: (context, state) => const TextToVideoPage(),
+              ),
+              GoRoute(
+                path: 'image-to-video',
+                name: 'generatorImageToVideo',
+                builder: (context, state) => const ImageToVideoPage(),
+              ),
+              GoRoute(
+                path: 'studio',
+                name: 'creativeStudio',
+                builder: (context, state) => CreativeStudioPage(
+                  initialMode: state.uri.queryParameters['mode'],
+                ),
+              ),
+              GoRoute(
+                path: 'image',
+                name: 'imageGen',
+                builder: (context, state) => ImageGenPage(
+                  initialStyle:
+                      state.uri.queryParameters['style'] ?? 'ghibli',
+                ),
+              ),
+              GoRoute(
+                path: 'script',
+                name: 'scriptWriter',
+                builder: (context, state) => const ScriptWriterPage(),
+              ),
+            ],
+          ),
         ],
       ),
       GoRoute(
@@ -160,6 +249,16 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.notifications,
         name: 'notifications',
         builder: (context, state) => const NotificationsPage(),
+      ),
+      GoRoute(
+        path: AppRoutes.wallet,
+        name: 'wallet',
+        builder: (context, state) => const WalletPage(),
+      ),
+      GoRoute(
+        path: AppRoutes.adminDashboard,
+        name: 'adminDashboard',
+        builder: (context, state) => const AdminDashboardPage(),
       ),
     ],
     errorBuilder: (context, state) => Scaffold(

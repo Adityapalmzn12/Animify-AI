@@ -75,7 +75,7 @@ class RefreshTokenRequest with _$RefreshTokenRequest {
 class ResetPasswordRequest with _$ResetPasswordRequest {
   const factory ResetPasswordRequest({
     required String email,
-    required String otp,
+    @JsonKey(name: 'code') required String otp,
     required String newPassword,
   }) = _ResetPasswordRequest;
 
@@ -106,6 +106,8 @@ class UserModel with _$UserModel {
     required String name,
     String? avatarUrl,
     required bool emailVerified,
+    @Default('USER') String role,
+    @Default(0) int creditBalance,
     required DateTime createdAt,
     SubscriptionModel? subscription,
     UsageModel? usage,
@@ -120,6 +122,8 @@ class UserModel with _$UserModel {
         name: name,
         avatarUrl: avatarUrl,
         emailVerified: emailVerified,
+        role: role,
+        creditBalance: creditBalance,
         createdAt: createdAt,
         subscription: subscription?.toEntity(),
         usage: usage?.toEntity(),

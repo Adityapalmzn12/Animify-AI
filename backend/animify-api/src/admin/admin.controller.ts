@@ -82,6 +82,14 @@ export class AdminController {
     return this.admin.withdrawCommission(body.amountInr, body.note);
   }
 
+  /** Mark that you topped up Replicate/OpenAI from the 45% API reserve. */
+  @Post('commission/api-purchased')
+  markApiPurchased(
+    @Body() body: { provider: string; amountInr: number },
+  ) {
+    return this.admin.markApiPurchased(body.provider, body.amountInr);
+  }
+
   @Get('subscriptions')
   subscriptions(@Query('page') page = '1', @Query('limit') limit = '20') {
     return this.admin.listSubscriptions(parseInt(page, 10), parseInt(limit, 10));

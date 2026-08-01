@@ -180,6 +180,10 @@ export class AdminService {
     const userMap = new Map(users.map((u) => [u.id, u]));
 
     const mustBuy = providers.filter((p) => p.mustBuy || p.status === 'needs_topup');
+    const money = await this.commission.summary();
+    const reserveBuys = (money.buyApisNow || []).filter(
+      (b: { amountInr?: number }) => Number(b.amountInr || 0) > 0,
+    );
 
     return {
       generatedAt: new Date().toISOString(),
@@ -190,14 +194,40 @@ export class AdminService {
         creditsSpent24h: Math.abs(spend24h._sum.amount ?? 0),
         activeJobs: activeJobs.length,
         apisNeedingTopUp: mustBuy.map((p) => p.id),
+        yourProfitInr: money.totals?.availableProfitInr ?? 0,
+        apiReserveInr: money.totals?.apiReserveAvailableInr ?? 0,
+      },
+      /** Admin money desk — not shown in user app */
+      moneyDesk: {
+        profitAvailableInr: money.totals?.availableProfitInr ?? 0,
+        apiReserveInr: money.totals?.apiReserveAvailableInr ?? 0,
+        revenueByUser: money.revenueByUser?.slice(0, 10) || [],
+        apiUsage7d: money.apiUsage7d || [],
       },
       providers,
-      buyNow: mustBuy.map((p) => ({
-        id: p.id,
-        name: p.name,
-        reason: p.message,
-        buyUrl: p.buyUrl,
-      })),
+      buyNow: [
+        ...reserveBuys.map((b: {
+          provider: string;
+          name: string;
+          amountInr: number;
+          buyUrl: string;
+          action?: string;
+        }) => ({
+          id: b.provider,
+          name: b.name,
+          reason: b.action || `Auto from credit sales — top up ₹${b.amountInr}`,
+          buyUrl: b.buyUrl,
+          amountInr: b.amountInr,
+          fromSalesReserve: true,
+        })),
+        ...mustBuy.map((p) => ({
+          id: p.id,
+          name: p.name,
+          reason: p.message,
+          buyUrl: p.buyUrl,
+          fromSalesReserve: false,
+        })),
+      ],
       liveActiveUsers: activeJobs.map((j) => ({
         jobId: j.id,
         userId: j.userId,
@@ -571,6 +601,10 @@ export class AdminService {
 
   withdrawCommission(amountInr: number, note?: string) {
     return this.commission.withdraw(amountInr, note);
+  }
+
+  markApiPurchased(provider: string, amountInr: number) {
+    return this.commission.markApiPurchased(provider, amountInr);
   }
 
   async listSubscriptions(page = 1, limit = 20) {

@@ -6,6 +6,12 @@ import { api } from "@/lib/api";
 type Ops = {
   generatedAt?: string;
   summary?: Record<string, unknown>;
+  moneyDesk?: {
+    profitAvailableInr?: number;
+    apiReserveInr?: number;
+    revenueByUser?: Array<Record<string, unknown>>;
+    apiUsage7d?: Array<Record<string, unknown>>;
+  };
   buyNow?: Array<Record<string, unknown>>;
   providers?: Array<Record<string, unknown>>;
   liveActiveUsers?: Array<Record<string, unknown>>;
@@ -76,8 +82,8 @@ export default function DashboardPage() {
         {(
           [
             ["Users", summary.users],
-            ["Premium", summary.premiumSubscribers],
-            ["Credits spent 24h", summary.creditsSpent24h],
+            ["Your profit ₹", summary.yourProfitInr],
+            ["API reserve ₹", summary.apiReserveInr],
             ["Active jobs", summary.activeJobs],
           ] as Array<[string, unknown]>
         ).map(([label, value]) => (
@@ -87,6 +93,21 @@ export default function DashboardPage() {
           </div>
         ))}
       </section>
+
+      {(ops?.moneyDesk?.apiUsage7d || []).length ? (
+        <section className="space-y-2">
+          <h2 className="text-lg font-semibold">API usage (7d) — admin only</h2>
+          <div className="flex flex-wrap gap-2">
+            {(ops?.moneyDesk?.apiUsage7d || []).map((r) => (
+              <div key={String(r.provider)} className="panel px-4 py-3 text-sm">
+                <span className="font-semibold">{String(r.provider)}</span>
+                <span className="text-muted"> · {String(r.jobs)} jobs · </span>
+                <span className="text-accent">{String(r.sharePercent)}%</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">Buy / top up now</h2>

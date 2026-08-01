@@ -3,49 +3,71 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 
-type CommissionSummary = {
-  marginPercent: number;
-  split: { ownerCommission: string; apiUsageBudget: string };
+type BuyApi = {
+  provider: string;
+  name: string;
+  amountInr: number;
+  buyUrl: string;
+  usedFor?: string;
+  action?: string;
+};
+
+type Row = {
+  userId: string;
+  email?: string;
+  name?: string;
+  paidInr: number;
+  yourProfitInr: number;
+  apiBudgetInr: number;
+  purchases: number;
+  creditBalance?: number;
+  plan?: string;
+};
+
+type Summary = {
+  split: { ownerProfit: string; apiAutoReserve: string };
   note?: string;
-  owner: {
-    id: string;
-    email: string;
-    name: string;
-    earningsBalanceInr: number;
-  } | null;
+  owner: { email: string; name: string; profitBalanceInr: number } | null;
   totals: {
     salesCount: number;
     grossInr: number;
-    commissionInr: number;
+    profitInr: number;
     apiBudgetInr: number;
-    availableCommissionInr: number;
+    availableProfitInr: number;
     withdrawnInr: number;
-    lifetimeCommissionInr: number;
+    apiReserveAvailableInr: number;
+    apiReserveSpentInr: number;
   };
+  revenueByUser: Row[];
+  apiUsage7d: Array<{
+    provider: string;
+    jobs: number;
+    credits: number;
+    sharePercent: number;
+  }>;
+  buyApisNow: BuyApi[];
   recent: Array<{
     id: string;
     source: string;
     grossInr: number;
-    commissionInr: number;
+    profitInr: number;
     apiBudgetInr: number;
-    creditsGranted: number;
     createdAt: string;
     buyer?: { email?: string; name?: string };
   }>;
 };
 
 export default function CommissionPage() {
-  const [data, setData] = useState<CommissionSummary | null>(null);
+  const [data, setData] = useState<Summary | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [withdrawAmt, setWithdrawAmt] = useState("");
 
   const load = useCallback(async () => {
     try {
-      const s = await api<CommissionSummary>("/admin/commission");
-      setData(s);
+      setData(await api<Summary>("/admin/commission"));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load commission");
+      setError(e instanceof Error ? e.message : "Failed to load");
     }
   }, []);
 
@@ -60,10 +82,7 @@ export default function CommissionPage() {
     try {
       await api("/admin/commission/withdraw", {
         method: "POST",
-        body: JSON.stringify({
-          amountInr: Number(withdrawAmt),
-          note: "Owner payout",
-        }),
+        body: JSON.stringify({ amountInr: Number(withdrawAmt), note: "Payout" }),
       });
       setWithdrawAmt("");
       await load();
@@ -74,22 +93,32 @@ export default function CommissionPage() {
     }
   }
 
+  async function markBought(provider: string, amountInr: number) {
+    setBusy(true);
+    try {
+      await api("/admin/commission/api-purchased", {
+        method: "POST",
+        body: JSON.stringify({ provider, amountInr }),
+      });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Mark failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const t = data?.totals;
 
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="font-display text-3xl md:text-4xl">Your commission</h1>
+        <h1 className="font-display text-3xl md:text-4xl">Money desk</h1>
         <p className="text-muted text-sm mt-1">
-          Jab user credits kharida →{" "}
-          <strong className="text-white">
-            {data?.split.ownerCommission || "55%"}
-          </strong>{" "}
-          auto aapke account mein credit ·{" "}
-          <strong className="text-white">
-            {data?.split.apiUsageBudget || "45%"}
-          </strong>{" "}
-          API usage budget.
+          Sirf admin — user app pe yeh kuch nahi dikhta. User credits kharida →{" "}
+          <strong className="text-white">55% aapka profit</strong> ·{" "}
+          <strong className="text-white">45% auto API reserve</strong> taaki
+          users generate kar saken.
         </p>
       </header>
 
@@ -97,109 +126,169 @@ export default function CommissionPage() {
 
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="panel p-4">
-          <p className="text-xs uppercase tracking-wide text-muted">
-            Available (your account)
-          </p>
+          <p className="text-xs text-muted uppercase tracking-wide">Aapka profit</p>
           <p className="text-3xl font-semibold text-accent mt-1">
-            ₹{t?.availableCommissionInr ?? 0}
+            ₹{t?.availableProfitInr ?? 0}
           </p>
         </div>
         <div className="panel p-4">
-          <p className="text-xs uppercase tracking-wide text-muted">
-            Lifetime commission 55%
-          </p>
+          <p className="text-xs text-muted uppercase tracking-wide">API reserve (45%)</p>
           <p className="text-3xl font-semibold mt-1">
-            ₹{t?.lifetimeCommissionInr ?? t?.commissionInr ?? 0}
+            ₹{t?.apiReserveAvailableInr ?? 0}
           </p>
+          <p className="text-xs text-muted">spent ₹{t?.apiReserveSpentInr ?? 0}</p>
         </div>
         <div className="panel p-4">
-          <p className="text-xs uppercase tracking-wide text-muted">
-            API budget 45%
-          </p>
-          <p className="text-3xl font-semibold mt-1">
-            ₹{t?.apiBudgetInr ?? 0}
-          </p>
-        </div>
-        <div className="panel p-4">
-          <p className="text-xs uppercase tracking-wide text-muted">
-            Total sales
-          </p>
+          <p className="text-xs text-muted uppercase tracking-wide">Total sales</p>
           <p className="text-3xl font-semibold mt-1">₹{t?.grossInr ?? 0}</p>
-          <p className="text-xs text-muted">{t?.salesCount ?? 0} purchases</p>
+          <p className="text-xs text-muted">{t?.salesCount ?? 0} buys</p>
+        </div>
+        <div className="panel p-4">
+          <p className="text-xs text-muted uppercase tracking-wide">Lifetime profit</p>
+          <p className="text-3xl font-semibold mt-1">₹{t?.profitInr ?? 0}</p>
         </div>
       </div>
 
-      {data?.owner ? (
-        <div className="panel p-4 text-sm">
-          Credited to: <strong>{data.owner.name}</strong> ({data.owner.email}) ·
-          earnings balance ₹{data.owner.earningsBalanceInr}
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">Ab kaunsi API buy / top-up karein</h2>
+        <p className="text-sm text-muted">
+          Credit sales se 45% yahan auto reserve hota hai. Link pe jaake top-up
+          karo, phir Mark purchased dabao.
+        </p>
+        <div className="grid md:grid-cols-2 gap-3">
+          {(data?.buyApisNow || [])
+            .filter((b) => Number(b.amountInr) > 0)
+            .map((b) => (
+              <div key={b.provider} className="panel p-4 space-y-3 border-amber-500/30">
+                <div className="flex justify-between gap-2">
+                  <div>
+                    <p className="font-semibold text-amber-300">{b.name}</p>
+                    <p className="text-xs text-muted">{b.usedFor}</p>
+                    <p className="text-2xl font-semibold mt-2">₹{b.amountInr}</p>
+                  </div>
+                  <a
+                    className="btn btn-primary h-fit"
+                    href={b.buyUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Buy / top up
+                  </a>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={busy}
+                  onClick={() => markBought(b.provider, b.amountInr)}
+                >
+                  Mark purchased
+                </button>
+              </div>
+            ))}
+          {!data?.buyApisNow?.some((b) => Number(b.amountInr) > 0) ? (
+            <div className="panel p-4 text-muted text-sm">
+              Abhi pending API reserve nahi — jab users credits kharidenge,
+              yahan auto amount aa jayega.
+            </div>
+          ) : null}
         </div>
-      ) : null}
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">Kaunsi API zyada use ho rahi hai (7d)</h2>
+        <div className="panel overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-left text-muted border-b border-line">
+              <tr>
+                <th className="p-3">API</th>
+                <th className="p-3">Jobs</th>
+                <th className="p-3">Credits</th>
+                <th className="p-3">Share</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(data?.apiUsage7d || []).map((r) => (
+                <tr key={r.provider} className="border-b border-line/50">
+                  <td className="p-3 font-medium">{r.provider}</td>
+                  <td className="p-3">{r.jobs}</td>
+                  <td className="p-3">{r.credits}</td>
+                  <td className="p-3">{r.sharePercent}%</td>
+                </tr>
+              ))}
+              {!data?.apiUsage7d?.length ? (
+                <tr>
+                  <td colSpan={4} className="p-4 text-muted">
+                    Abhi usage data kam hai.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">Per user — kitna aa raha hai</h2>
+        <div className="panel overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-left text-muted border-b border-line">
+              <tr>
+                <th className="p-3">User</th>
+                <th className="p-3">Plan</th>
+                <th className="p-3">Paid</th>
+                <th className="p-3">Aapka 55%</th>
+                <th className="p-3">API 45%</th>
+                <th className="p-3">Wallet</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(data?.revenueByUser || []).map((u) => (
+                <tr key={u.userId} className="border-b border-line/50">
+                  <td className="p-3">
+                    <p className="font-medium">{u.name || "—"}</p>
+                    <p className="text-xs text-muted">{u.email}</p>
+                  </td>
+                  <td className="p-3">{u.plan}</td>
+                  <td className="p-3">₹{u.paidInr}</td>
+                  <td className="p-3 text-accent font-semibold">
+                    ₹{u.yourProfitInr}
+                  </td>
+                  <td className="p-3">₹{u.apiBudgetInr}</td>
+                  <td className="p-3">{u.creditBalance ?? 0} cr</td>
+                </tr>
+              ))}
+              {!data?.revenueByUser?.length ? (
+                <tr>
+                  <td colSpan={6} className="p-4 text-muted">
+                    Jab koi user Stripe se credits kharidega, yahan dikhega.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <form onSubmit={withdraw} className="panel p-5 flex flex-wrap gap-3 items-end">
         <label className="block space-y-1">
-          <span className="text-xs text-muted">Withdraw / mark paid (₹)</span>
+          <span className="text-xs text-muted">Profit withdraw / mark paid (₹)</span>
           <input
             className="input"
             type="number"
             min={1}
-            step="0.01"
             value={withdrawAmt}
             onChange={(e) => setWithdrawAmt(e.target.value)}
-            placeholder="e.g. 500"
           />
         </label>
         <button className="btn btn-primary" disabled={busy || !withdrawAmt}>
-          {busy ? "…" : "Mark withdrawn"}
+          Mark withdrawn
         </button>
-        <p className="text-xs text-muted w-full">
-          Real bank money Stripe dashboard se aata hai. Yahan aapka 55% share
-          track + account balance update hota hai.
-        </p>
+        {data?.owner ? (
+          <p className="text-xs text-muted w-full">
+            Profit account: {data.owner.name} ({data.owner.email})
+          </p>
+        ) : null}
       </form>
-
-      <div className="panel overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="text-left text-muted border-b border-line">
-            <tr>
-              <th className="p-3">When</th>
-              <th className="p-3">Buyer</th>
-              <th className="p-3">Source</th>
-              <th className="p-3">Gross</th>
-              <th className="p-3">Your 55%</th>
-              <th className="p-3">API 45%</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(data?.recent || []).map((r) => (
-              <tr key={r.id} className="border-b border-line/50">
-                <td className="p-3 text-xs text-muted">
-                  {new Date(r.createdAt).toLocaleString()}
-                </td>
-                <td className="p-3">
-                  {r.buyer?.name || "—"}
-                  <br />
-                  <span className="text-xs text-muted">{r.buyer?.email}</span>
-                </td>
-                <td className="p-3">{r.source}</td>
-                <td className="p-3">₹{r.grossInr}</td>
-                <td className="p-3 text-accent font-semibold">
-                  ₹{r.commissionInr}
-                </td>
-                <td className="p-3">₹{r.apiBudgetInr}</td>
-              </tr>
-            ))}
-            {!data?.recent?.length ? (
-              <tr>
-                <td className="p-4 text-muted" colSpan={6}>
-                  Abhi koi purchase nahi — jab user Wallet/Subscription se
-                  credits kharidega, yahan auto dikhega.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
     </div>
   );
 }

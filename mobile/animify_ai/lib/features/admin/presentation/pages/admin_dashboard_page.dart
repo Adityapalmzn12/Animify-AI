@@ -55,6 +55,13 @@ class AdminDashboardPage extends ConsumerWidget {
             padding: const EdgeInsets.all(16),
             children: [
               ListTile(
+                leading: const Icon(Icons.monitor_heart_outlined),
+                title: const Text('API health, buy links & live users'),
+                subtitle: const Text('See which API to top up (Fal, Replicate…)'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => context.push(AppRoutes.adminOps),
+              ),
+              ListTile(
                 leading: const Icon(Icons.people_outline),
                 title: const Text('Manage users & grant credits'),
                 trailing: const Icon(Icons.chevron_right),

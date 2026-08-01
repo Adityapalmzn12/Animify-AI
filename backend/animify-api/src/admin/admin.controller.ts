@@ -30,6 +30,12 @@ export class AdminController {
     return this.admin.metrics();
   }
 
+  /** Provider health, buy links, live users, subscriptions. */
+  @Get('ops')
+  ops() {
+    return this.admin.opsDashboard();
+  }
+
   @Get('users')
   users(@Query('page') page = '1', @Query('limit') limit = '20') {
     return this.admin.listUsers(parseInt(page, 10), parseInt(limit, 10));

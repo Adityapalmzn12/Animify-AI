@@ -30,6 +30,7 @@ import '../../features/generator/presentation/pages/script_writer_page.dart';
 import '../../features/wallet/presentation/pages/wallet_page.dart';
 import '../../features/admin/presentation/pages/admin_dashboard_page.dart';
 import '../../features/admin/presentation/pages/admin_users_page.dart';
+import '../../features/admin/presentation/pages/admin_ops_page.dart';
 import '../widgets/main_scaffold.dart';
 
 abstract class AppRoutes {
@@ -65,6 +66,7 @@ abstract class AppRoutes {
   static const String admin = '/admin';
   static const String adminDashboard = '/admin/dashboard';
   static const String adminUsers = '/admin/users';
+  static const String adminOps = '/admin/ops';
 }
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -265,6 +267,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.adminUsers,
         name: 'adminUsers',
         builder: (context, state) => const AdminUsersPage(),
+      ),
+      GoRoute(
+        path: AppRoutes.adminOps,
+        name: 'adminOps',
+        builder: (context, state) => const AdminOpsPage(),
       ),
     ],
     errorBuilder: (context, state) => Scaffold(

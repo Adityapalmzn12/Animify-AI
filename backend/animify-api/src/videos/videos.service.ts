@@ -104,7 +104,11 @@ export class VideosService {
 
     const prepaid =
       dto.skipCreditDebit === true || settings.creditsPrepaid === true;
-    const creditsCost = prepaid ? 0 : this.creditCostFor(jobType);
+    const scriptedCredits = Number(settings.prepaidCredits) || 0;
+    const creditsCost =
+      settings.pipeline === 'scripted_story' && scriptedCredits > 0
+        ? scriptedCredits
+        : this.creditCostFor(jobType);
     if (!prepaid) {
       await this.creditsService.debitCredits(
         userId,
@@ -126,9 +130,7 @@ export class VideosService {
           prompt: dto.prompt || null,
           jobType,
           provider,
-          creditsCost: prepaid
-            ? Number(settings.prepaidCredits) || this.creditCostFor(jobType)
-            : creditsCost,
+          creditsCost,
           status: 'PENDING',
           progress: 0,
           currentStep: `Queued — ${profile.name}`,

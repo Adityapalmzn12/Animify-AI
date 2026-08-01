@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/network/api_client.dart';
+import '../../../../core/router/app_router.dart';
 import '../../../../core/widgets/async_state_views.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 
@@ -51,20 +53,29 @@ class AdminDashboardPage extends ConsumerWidget {
 
           return ListView(
             padding: const EdgeInsets.all(16),
-            children: metrics.entries.map((entry) {
-              return Card(
-                child: ListTile(
-                  leading: const Icon(Icons.insights),
-                  title: Text(_formatKey(entry.key)),
-                  trailing: Text(
-                    '${entry.value}',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+            children: [
+              ListTile(
+                leading: const Icon(Icons.people_outline),
+                title: const Text('Manage users & grant credits'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => context.push(AppRoutes.adminUsers),
+              ),
+              const Divider(),
+              ...metrics.entries.map((entry) {
+                return Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.insights),
+                    title: Text(_formatKey(entry.key)),
+                    trailing: Text(
+                      '${entry.value}',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
                   ),
-                ),
-              );
-            }).toList(),
+                );
+              }),
+            ],
           );
         },
       ),

@@ -29,6 +29,7 @@ import '../../features/generator/presentation/pages/image_gen_page.dart';
 import '../../features/generator/presentation/pages/script_writer_page.dart';
 import '../../features/wallet/presentation/pages/wallet_page.dart';
 import '../../features/admin/presentation/pages/admin_dashboard_page.dart';
+import '../../features/admin/presentation/pages/admin_users_page.dart';
 import '../widgets/main_scaffold.dart';
 
 abstract class AppRoutes {
@@ -259,6 +260,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.adminDashboard,
         name: 'adminDashboard',
         builder: (context, state) => const AdminDashboardPage(),
+      ),
+      GoRoute(
+        path: AppRoutes.adminUsers,
+        name: 'adminUsers',
+        builder: (context, state) => const AdminUsersPage(),
       ),
     ],
     errorBuilder: (context, state) => Scaffold(

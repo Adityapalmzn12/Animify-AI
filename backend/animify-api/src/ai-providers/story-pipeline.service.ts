@@ -114,11 +114,13 @@ export class StoryPipelineService {
     aspect: string;
     targetDuration: number;
     characterFileIds?: string[];
+    addAudio?: boolean;
     onProgress: (progress: number, step: string) => Promise<void>;
   }): Promise<{ buffer: Buffer; mimeType: string; fileName: string }> {
     const duration = StoryPipelineService.normalizeDuration(
       params.targetDuration,
     );
+    const requireAudio = params.addAudio !== false;
     const scenes = this.parseScenes(params.script, duration);
     const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'animify-story-'));
     const clipPaths: string[] = [];
@@ -177,8 +179,14 @@ export class StoryPipelineService {
         ]);
         clipPaths.push(timedPath);
 
-        const audioBuf = await this.synthesizeTts(scene.dialogue);
-        if (audioBuf) {
+        if (requireAudio) {
+          const narration = this.narrationForScene(scene);
+          const audioBuf = await this.synthesizeTts(narration);
+          if (!audioBuf?.length) {
+            throw new Error(
+              'Voice generation failed. Check OPENAI_API_KEY or ELEVENLABS_API_KEY.',
+            );
+          }
           const ap = path.join(workDir, `audio_${i}.mp3`);
           await fs.writeFile(ap, audioBuf);
           audioPaths.push(ap);
@@ -207,7 +215,10 @@ export class StoryPipelineService {
       ]);
 
       const outPath = path.join(workDir, 'final.mp4');
-      if (audioPaths.length) {
+      if (requireAudio) {
+        if (!audioPaths.length) {
+          throw new Error('Voice track missing for video');
+        }
         const narrationPath = path.join(workDir, 'narration.mp3');
         if (audioPaths.length === 1) {
           await fs.copyFile(audioPaths[0], narrationPath);
@@ -261,6 +272,12 @@ export class StoryPipelineService {
     } finally {
       await fs.rm(workDir, { recursive: true, force: true }).catch(() => undefined);
     }
+  }
+
+  private narrationForScene(scene: StoryScene): string {
+    const raw = (scene.dialogue || scene.prompt || '').trim();
+    if (raw.length >= 12) return raw.slice(0, 900);
+    return `Scene ${scene.index}. ${raw || 'A cinematic moment unfolds.'}`;
   }
 
   private async resolveCharacterUrls(fileIds: string[]): Promise<string[]> {
@@ -354,32 +371,103 @@ export class StoryPipelineService {
   private async synthesizeTts(text: string): Promise<Buffer | null> {
     const clean = (text || '').trim().slice(0, 900);
     if (!clean) return null;
-    const key = this.config.get<string>('ai.openai.apiKey');
-    if (!key) return null;
-    try {
-      const res = await fetch('https://api.openai.com/v1/audio/speech', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${key}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'tts-1',
-          input: clean,
-          voice: 'alloy',
-        }),
-      });
-      if (!res.ok) {
-        this.logger.warn(`TTS failed: ${await res.text()}`);
-        return null;
+
+    const openaiKey = this.config.get<string>('ai.openai.apiKey');
+    if (openaiKey) {
+      try {
+        const res = await fetch('https://api.openai.com/v1/audio/speech', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${openaiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'tts-1',
+            input: clean,
+            voice: 'alloy',
+          }),
+        });
+        if (res.ok) return Buffer.from(await res.arrayBuffer());
+        this.logger.warn(`OpenAI TTS failed: ${await res.text()}`);
+      } catch (error) {
+        this.logger.warn(
+          `OpenAI TTS error: ${error instanceof Error ? error.message : error}`,
+        );
       }
-      return Buffer.from(await res.arrayBuffer());
+    }
+
+    const elevenKey = this.config.get<string>('ai.elevenlabs.apiKey');
+    if (elevenKey) {
+      try {
+        const voiceId = '21m00Tcm4TlvDq8ikWAM';
+        const res = await fetch(
+          `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+          {
+            method: 'POST',
+            headers: {
+              'xi-api-key': elevenKey,
+              'Content-Type': 'application/json',
+              Accept: 'audio/mpeg',
+            },
+            body: JSON.stringify({
+              text: clean,
+              model_id: 'eleven_multilingual_v2',
+            }),
+          },
+        );
+        if (res.ok) return Buffer.from(await res.arrayBuffer());
+        this.logger.warn(`ElevenLabs TTS failed: ${await res.text()}`);
+      } catch (error) {
+        this.logger.warn(
+          `ElevenLabs TTS error: ${
+            error instanceof Error ? error.message : error
+          }`,
+        );
+      }
+    }
+
+    // Local OSS fallback so voice is never skipped when cloud TTS is billed out
+    try {
+      const id = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      const wavPath = path.join(os.tmpdir(), `tts_${id}.wav`);
+      const mp3Path = path.join(os.tmpdir(), `tts_${id}.mp3`);
+      await new Promise<void>((resolve, reject) => {
+        const proc = spawn(
+          'espeak-ng',
+          ['-w', wavPath, '-s', '150', clean],
+          { stdio: ['ignore', 'ignore', 'pipe'] },
+        );
+        let err = '';
+        proc.stderr.on('data', (d) => {
+          err += d.toString();
+        });
+        proc.on('error', (e) => reject(e));
+        proc.on('close', (code) => {
+          if (code === 0) resolve();
+          else reject(new Error(err || `espeak-ng exited ${code}`));
+        });
+      });
+      await this.ffmpeg([
+        '-y',
+        '-i',
+        wavPath,
+        '-codec:a',
+        'libmp3lame',
+        '-q:a',
+        '4',
+        mp3Path,
+      ]);
+      const mp3 = await fs.readFile(mp3Path);
+      await fs.unlink(wavPath).catch(() => undefined);
+      await fs.unlink(mp3Path).catch(() => undefined);
+      return mp3;
     } catch (error) {
       this.logger.warn(
-        `TTS error: ${error instanceof Error ? error.message : error}`,
+        `espeak TTS error: ${error instanceof Error ? error.message : error}`,
       );
-      return null;
     }
+
+    return null;
   }
 
   private ffmpeg(args: string[]): Promise<void> {

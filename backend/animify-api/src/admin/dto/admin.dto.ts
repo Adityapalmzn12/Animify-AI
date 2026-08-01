@@ -24,6 +24,19 @@ export class UpdateAdminUserDto {
   role?: UserRole;
 }
 
+export class GrantCreditsDto {
+  @ApiProperty({ example: 100 })
+  @IsInt()
+  @Min(1)
+  amount: number;
+
+  @ApiPropertyOptional({ example: 'Support top-up' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  reason?: string;
+}
+
 export class UpsertFeatureFlagDto {
   @ApiProperty()
   @IsString()

@@ -9,6 +9,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/app_text_field.dart';
 import '../../../../core/widgets/themed_choice_chip.dart';
+import '../../../../core/widgets/video_duration_chips.dart';
 
 class ImageToVideoPage extends ConsumerStatefulWidget {
   const ImageToVideoPage({super.key});
@@ -25,6 +26,7 @@ class _ImageToVideoPageState extends ConsumerState<ImageToVideoPage> {
   String? _localPreviewName;
   String _aspect = '9:16';
   String _style = 'anime';
+  int _duration = 30;
   bool _isUploading = false;
   bool _isSubmitting = false;
   double _uploadProgress = 0;
@@ -103,13 +105,15 @@ class _ImageToVideoPageState extends ConsumerState<ImageToVideoPage> {
           'prompt': _promptController.text.trim(),
           'aspect': _aspect,
           'style': _style,
+          'duration': _duration,
+          'addAudio': true,
         },
       );
 
       if (mounted) {
         final jobId = res.data?['id'] as String?;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Image→Video started')),
+          SnackBar(content: Text('${_duration}s video with voice started')),
         );
         if (jobId != null) {
           context.go('/videos/$jobId');
@@ -149,7 +153,7 @@ class _ImageToVideoPageState extends ConsumerState<ImageToVideoPage> {
                   ),
                 ),
                 child: Text(
-                  'Pick a photo, then describe the motion. Uses Fal when configured.',
+                  'Pick a photo, choose length, and describe motion. Voice narration is added automatically.',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
               ),
@@ -178,15 +182,21 @@ class _ImageToVideoPageState extends ConsumerState<ImageToVideoPage> {
               const SizedBox(height: 24),
               AppTextField(
                 controller: _promptController,
-                label: 'Motion prompt',
-                hint: 'Slow zoom, soft wind in hair, cinematic light…',
-                maxLines: 3,
+                label: 'Motion / script',
+                hint:
+                    'Scene 1: Camera slowly pushes in\nScene 2: Soft wind, smile…',
+                maxLines: 4,
                 validator: (v) {
                   if (v == null || v.trim().length < 3) {
                     return 'Enter at least 3 characters';
                   }
                   return null;
                 },
+              ),
+              const SizedBox(height: 24),
+              VideoDurationChips(
+                value: _duration,
+                onChanged: (d) => setState(() => _duration = d),
               ),
               const SizedBox(height: 24),
               Text('Aspect', style: Theme.of(context).textTheme.titleSmall),
@@ -215,7 +225,7 @@ class _ImageToVideoPageState extends ConsumerState<ImageToVideoPage> {
               AppButton(
                 onPressed: (_isSubmitting || _isUploading) ? null : _submit,
                 isLoading: _isSubmitting,
-                child: const Text('Generate Video'),
+                child: Text('Generate ${_duration}s Video'),
               ),
             ],
           ),

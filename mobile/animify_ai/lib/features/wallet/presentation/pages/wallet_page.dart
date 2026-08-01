@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/l10n/app_localizations.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/async_state_views.dart';
+import '../../../../core/widgets/themed_choice_chip.dart';
 import '../providers/wallet_provider.dart';
 
 class WalletPage extends ConsumerStatefulWidget {
@@ -18,11 +20,46 @@ class WalletPage extends ConsumerStatefulWidget {
 class _WalletPageState extends ConsumerState<WalletPage> {
   final _promoController = TextEditingController();
   bool _isRedeeming = false;
+  bool _isBuying = false;
+  int _selectedPack = 100;
+
+  static const _packs = [50, 100, 250, 500];
 
   @override
   void dispose() {
     _promoController.dispose();
     super.dispose();
+  }
+
+  Future<void> _buyCredits() async {
+    setState(() => _isBuying = true);
+    try {
+      final api = ref.read(apiClientProvider);
+      final res = await api.post<Map<String, dynamic>>(
+        '/payments/wallet/topup',
+        data: {'credits': _selectedPack},
+      );
+      final url = res.data?['url'] as String?;
+      if (url == null) throw Exception('No payment URL');
+      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Finish payment in the browser. Pull to refresh Wallet after success.',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Top-up failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isBuying = false);
+    }
   }
 
   Future<void> _redeemPromo() async {
@@ -109,6 +146,43 @@ class _WalletPageState extends ConsumerState<WalletPage> {
                   ),
                 ),
               ),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'Buy more credits',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'When your plan credits run out, top up here to keep generating.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              children: _packs
+                  .map(
+                    (p) => ThemedChoiceChip(
+                      label: '$p credits',
+                      selected: _selectedPack == p,
+                      onSelected: (_) => setState(() => _selectedPack = p),
+                    ),
+                  )
+                  .toList(),
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: _isBuying ? null : _buyCredits,
+              icon: _isBuying
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.shopping_cart_outlined),
+              label: Text('Buy $_selectedPack credits (≈ ₹$_selectedPack)'),
             ),
             const SizedBox(height: 24),
             Text(

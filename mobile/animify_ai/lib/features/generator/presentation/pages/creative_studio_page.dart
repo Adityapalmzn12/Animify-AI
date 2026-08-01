@@ -10,6 +10,7 @@ import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/app_text_field.dart';
 import '../../../../core/widgets/async_state_views.dart';
 import '../../../../core/widgets/themed_choice_chip.dart';
+import '../../../../core/widgets/video_duration_chips.dart';
 
 class CreativeStudioPage extends ConsumerStatefulWidget {
   final String? initialMode;
@@ -38,8 +39,6 @@ class _CreativeStudioPageState extends ConsumerState<CreativeStudioPage> {
   final List<String> _characterFileIds = [];
   String? _resultUrl;
   String? _error;
-
-  static const _durations = [15, 30, 59];
 
   @override
   void initState() {
@@ -123,6 +122,11 @@ class _CreativeStudioPageState extends ConsumerState<CreativeStudioPage> {
             'title': 'Character IP',
             'subtitle': 'Mascot design'
           },
+          {
+            'mode': 'ppt',
+            'title': 'PPT Maker',
+            'subtitle': 'AI PowerPoint decks'
+          },
         ];
         _selectedMode ??= 'logo';
       });
@@ -177,9 +181,9 @@ class _CreativeStudioPageState extends ConsumerState<CreativeStudioPage> {
             'brandName': _brandController.text.trim(),
           'animate': _animate,
           'aspect': isVideo ? '9:16' : '1:1',
-          if (isVideo) 'duration': _duration,
-          if (isVideo) 'addAudio': true,
-          if (isVideo && _characterFileIds.isNotEmpty)
+          if (isVideo || _animate) 'duration': _duration,
+          if (isVideo || _animate) 'addAudio': true,
+          if ((isVideo || _animate) && _characterFileIds.isNotEmpty)
             'characterImageFileIds': _characterFileIds,
         },
       );
@@ -274,21 +278,10 @@ class _CreativeStudioPageState extends ConsumerState<CreativeStudioPage> {
                     label: 'Brand / company name (optional)',
                     hint: 'e.g. Ember Coffee',
                   ),
-                if (isVideoMode) ...[
-                  Text(
-                    'Length',
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    children: _durations.map((d) {
-                      return ThemedChoiceChip(
-                        label: '${d}s',
-                        selected: _duration == d,
-                        onSelected: (_) => setState(() => _duration = d),
-                      );
-                    }).toList(),
+                if (isVideoMode || _animate) ...[
+                  VideoDurationChips(
+                    value: _duration,
+                    onChanged: (d) => setState(() => _duration = d),
                   ),
                   const SizedBox(height: 12),
                   Text(
@@ -322,20 +315,15 @@ class _CreativeStudioPageState extends ConsumerState<CreativeStudioPage> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Audio narration is added automatically. You’ll only see Processing while the video is built.',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                  ),
                 ],
                 if (!isVideoMode) ...[
                   const SizedBox(height: 8),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Also animate to video'),
-                    subtitle: const Text('Creates a short motion clip after the image'),
+                    subtitle: Text(
+                      'Creates a ${_duration}s video with voice after the image',
+                    ),
                     value: _animate,
                     onChanged: (v) => setState(() => _animate = v),
                   ),
@@ -390,6 +378,8 @@ class _CreativeStudioPageState extends ConsumerState<CreativeStudioPage> {
             'Scene 3: Wide shot, camera rises over rooftops';
       case 'thumbnail':
         return 'Shocked creator pointing at floating AI robot, bold colors';
+      case 'ppt':
+        return 'Pitch deck for an AI video app: problem, solution, market, roadmap, CTA';
       default:
         return 'Describe what you want to create...';
     }

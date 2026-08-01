@@ -26,6 +26,7 @@ export enum CreativeMode {
   STORY_REEL = 'story_reel',
   CHARACTER = 'character',
   INTERIOR = 'interior',
+  PPT = 'ppt',
 }
 
 export const STYLE_PROMPTS: Record<CreativeMode, string> = {
@@ -53,6 +54,8 @@ export const STYLE_PROMPTS: Record<CreativeMode, string> = {
     'Original character / mascot IP design, full body, distinctive silhouette, merchandise-ready, clean background',
   [CreativeMode.INTERIOR]:
     'Interior design concept visualization, architectural photography, beautiful lighting, magazine quality',
+  [CreativeMode.PPT]:
+    'Professional presentation deck, clear hierarchy, business storytelling, actionable slides',
 };
 
 export class CreateStudioDto {

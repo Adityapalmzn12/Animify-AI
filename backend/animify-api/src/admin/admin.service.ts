@@ -5,8 +5,10 @@ import {
 import { Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiProviderBus } from '../ai-providers/providers/ai-provider.bus';
+import { CreditsService } from '../credits/credits.service';
 import {
   CreateCouponDto,
+  GrantCreditsDto,
   UpdateAdminUserDto,
   UpsertFeatureFlagDto,
 } from './dto/admin.dto';
@@ -16,6 +18,7 @@ export class AdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly bus: AiProviderBus,
+    private readonly credits: CreditsService,
   ) {}
 
   async metrics() {
@@ -62,9 +65,47 @@ export class AdminService {
           status: true,
           creditBalance: true,
           createdAt: true,
+          subscription: {
+            select: {
+              planType: true,
+              status: true,
+              expiresAt: true,
+              videoLimit: true,
+            },
+          },
         },
       }),
       this.prisma.user.count(),
+    ]);
+    return {
+      items,
+      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  async grantCredits(userId: string, dto: GrantCreditsDto) {
+    await this.getUserOrThrow(userId);
+    return this.credits.grantCredits(
+      userId,
+      dto.amount,
+      dto.reason || 'Admin credit grant',
+      'GRANT',
+      { source: 'admin' },
+    );
+  }
+
+  async listSubscriptions(page = 1, limit = 20) {
+    const skip = (page - 1) * limit;
+    const [items, total] = await Promise.all([
+      this.prisma.subscription.findMany({
+        orderBy: { updatedAt: 'desc' },
+        skip,
+        take: limit,
+        include: {
+          user: { select: { id: true, email: true, name: true, creditBalance: true } },
+        },
+      }),
+      this.prisma.subscription.count(),
     ]);
     return {
       items,

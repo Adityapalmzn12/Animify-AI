@@ -82,10 +82,10 @@ export class PaymentsService {
 
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
       customer: customerId,
-      mode: priceId ? 'subscription' : 'payment',
+      mode: 'subscription',
       success_url: successUrl,
       cancel_url: cancelUrl,
-      metadata: { userId },
+      metadata: { userId, type: 'subscription' },
     };
 
     if (priceId) {
@@ -144,7 +144,64 @@ export class PaymentsService {
       await this.onCheckoutCompleted(session);
     }
 
+    if (event.type === 'invoice.paid') {
+      const invoice = event.data.object as Stripe.Invoice;
+      await this.onInvoicePaid(invoice);
+    }
+
+    if (event.type === 'customer.subscription.deleted') {
+      const sub = event.data.object as Stripe.Subscription;
+      await this.onSubscriptionDeleted(sub);
+    }
+
     return { received: true };
+  }
+
+  private async onInvoicePaid(invoice: Stripe.Invoice) {
+    const customerId =
+      typeof invoice.customer === 'string' ? invoice.customer : null;
+    if (!customerId || invoice.billing_reason === 'subscription_create') {
+      // Initial checkout already granted credits via checkout.session.completed
+      return;
+    }
+    const sub = await this.prisma.subscription.findFirst({
+      where: { stripeCustomerId: customerId },
+    });
+    if (!sub) return;
+    const premiumGrant =
+      this.config.get<number>('credits.premiumMonthlyGrant') ?? 500;
+    const expiresAt = new Date();
+    expiresAt.setMonth(expiresAt.getMonth() + 1);
+    await this.prisma.subscription.update({
+      where: { id: sub.id },
+      data: {
+        planType: PlanType.PREMIUM,
+        status: SubscriptionStatus.ACTIVE,
+        expiresAt,
+      },
+    });
+    await this.credits.grantCredits(
+      sub.userId,
+      premiumGrant,
+      'Premium monthly renewal credits',
+      'GRANT',
+      { source: 'stripe_invoice', invoiceId: invoice.id },
+    );
+  }
+
+  private async onSubscriptionDeleted(stripeSub: Stripe.Subscription) {
+    const existing = await this.prisma.subscription.findFirst({
+      where: { stripeSubId: stripeSub.id },
+    });
+    if (!existing) return;
+    await this.prisma.subscription.update({
+      where: { id: existing.id },
+      data: {
+        planType: PlanType.FREE_TRIAL,
+        status: SubscriptionStatus.CANCELLED,
+        autoRenew: false,
+      },
+    });
   }
 
   private async onCheckoutCompleted(session: Stripe.Checkout.Session) {

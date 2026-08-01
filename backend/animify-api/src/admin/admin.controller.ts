@@ -13,6 +13,7 @@ import { AdminService } from './admin.service';
 import { Roles } from '../common/decorators/roles.decorator';
 import {
   CreateCouponDto,
+  GrantCreditsDto,
   UpdateAdminUserDto,
   UpsertFeatureFlagDto,
 } from './dto/admin.dto';
@@ -37,6 +38,16 @@ export class AdminController {
   @Patch('users/:id')
   updateUser(@Param('id') id: string, @Body() dto: UpdateAdminUserDto) {
     return this.admin.updateUser(id, dto);
+  }
+
+  @Post('users/:id/credits')
+  grantCredits(@Param('id') id: string, @Body() dto: GrantCreditsDto) {
+    return this.admin.grantCredits(id, dto);
+  }
+
+  @Get('subscriptions')
+  subscriptions(@Query('page') page = '1', @Query('limit') limit = '20') {
+    return this.admin.listSubscriptions(parseInt(page, 10), parseInt(limit, 10));
   }
 
   @Get('jobs')

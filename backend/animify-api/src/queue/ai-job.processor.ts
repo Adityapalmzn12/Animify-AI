@@ -86,13 +86,24 @@ export class AiJobProcessor {
       const settings = (videoJob.settings || {}) as Record<string, any>;
       const style = settings.style || 'anime';
 
-      // Scripted long-form story (15/30/59s) — user only sees "Processing"
+      // Scripted long-form story (15/30/59s) + voice — user only sees "Processing"
       if (
         settings.pipeline === 'scripted_story' ||
         settings.mode === 'story_reel' ||
-        (videoJob.jobType === 'TEXT_TO_VIDEO' &&
+        settings.addAudio === true ||
+        ((videoJob.jobType === 'TEXT_TO_VIDEO' ||
+          videoJob.jobType === 'IMAGE_TO_VIDEO') &&
           Number(settings.targetDuration || settings.duration) >= 15)
       ) {
+        const characterFileIds = Array.isArray(settings.characterFileIds)
+          ? [...settings.characterFileIds]
+          : [];
+        if (
+          videoJob.inputFileId &&
+          !characterFileIds.includes(videoJob.inputFileId)
+        ) {
+          characterFileIds.unshift(videoJob.inputFileId);
+        }
         const result = await this.storyPipeline.run({
           jobId,
           userId: videoJob.userId,
@@ -102,9 +113,8 @@ export class AiJobProcessor {
           targetDuration: Number(
             settings.targetDuration || settings.duration || 30,
           ),
-          characterFileIds: Array.isArray(settings.characterFileIds)
-            ? settings.characterFileIds
-            : [],
+          characterFileIds,
+          addAudio: settings.addAudio !== false,
           onProgress: async (progress) => emit(progress, 'Processing'),
         });
 

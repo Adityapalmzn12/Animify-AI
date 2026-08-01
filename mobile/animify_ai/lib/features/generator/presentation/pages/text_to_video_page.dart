@@ -7,6 +7,7 @@ import '../../../../core/router/app_router.dart';
 import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/app_text_field.dart';
 import '../../../../core/widgets/themed_choice_chip.dart';
+import '../../../../core/widgets/video_duration_chips.dart';
 
 class TextToVideoPage extends ConsumerStatefulWidget {
   const TextToVideoPage({super.key});
@@ -25,7 +26,6 @@ class _TextToVideoPageState extends ConsumerState<TextToVideoPage> {
 
   static const _aspects = ['9:16', '16:9', '1:1'];
   static const _styles = ['anime', 'cartoon', '3d', 'cinematic', 'watercolor'];
-  static const _durations = [15, 30, 59];
 
   @override
   void dispose() {
@@ -110,17 +110,9 @@ class _TextToVideoPageState extends ConsumerState<TextToVideoPage> {
                 onSelectionChanged: (s) => setState(() => _aspect = s.first),
               ),
               const SizedBox(height: 24),
-              Text('Length', style: Theme.of(context).textTheme.titleSmall),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                children: _durations.map((d) {
-                  return ThemedChoiceChip(
-                    label: '${d}s',
-                    selected: _duration == d,
-                    onSelected: (_) => setState(() => _duration = d),
-                  );
-                }).toList(),
+              VideoDurationChips(
+                value: _duration,
+                onChanged: (d) => setState(() => _duration = d),
               ),
               const SizedBox(height: 24),
               Text('Style', style: Theme.of(context).textTheme.titleSmall),

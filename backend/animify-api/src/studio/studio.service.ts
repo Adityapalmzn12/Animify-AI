@@ -12,6 +12,7 @@ import {
   STYLE_PROMPTS,
 } from './dto/studio.dto';
 import { StoryPipelineService } from '../ai-providers/story-pipeline.service';
+import { PptxService } from './pptx.service';
 
 @Injectable()
 export class StudioService {
@@ -24,6 +25,7 @@ export class StudioService {
     private readonly storage: StorageService,
     private readonly bus: AiProviderBus,
     private readonly videos: VideosService,
+    private readonly pptx: PptxService,
   ) {}
 
   modes() {
@@ -44,26 +46,25 @@ export class StudioService {
       !!dto.animate &&
       mode !== CreativeMode.PROMPT_TO_VIDEO &&
       mode !== CreativeMode.STORY_REEL;
-    const animateCost = willAnimate
-      ? this.config.get<number>('credits.imageToVideoCost') ?? 15
-      : 0;
     const isScriptedVideo =
       mode === CreativeMode.PROMPT_TO_VIDEO || mode === CreativeMode.STORY_REEL;
-    const targetDuration = isScriptedVideo
-      ? StoryPipelineService.normalizeDuration(dto.duration)
-      : undefined;
+    const targetDuration =
+      isScriptedVideo || willAnimate
+        ? StoryPipelineService.normalizeDuration(dto.duration)
+        : undefined;
     const segmentCount = targetDuration
       ? StoryPipelineService.segmentPlan(targetDuration).length
       : 1;
     const perClip =
       this.config.get<number>('credits.imageToVideoCost') ?? 15;
-    const audioCost =
-      isScriptedVideo && dto.addAudio !== false
-        ? this.config.get<number>('credits.voiceCost') ?? 3
+    const voiceCost = this.config.get<number>('credits.voiceCost') ?? 3;
+    const videoBundleCost =
+      isScriptedVideo || willAnimate
+        ? segmentCount * perClip + voiceCost
         : 0;
     const totalCost = isScriptedVideo
-      ? segmentCount * perClip + audioCost
-      : imageCost + animateCost;
+      ? videoBundleCost
+      : imageCost + (willAnimate ? videoBundleCost : 0);
 
     await this.credits.debitCredits(
       userId,
@@ -84,6 +85,10 @@ export class StudioService {
           mode,
           targetDuration!,
         );
+      }
+
+      if (mode === CreativeMode.PPT) {
+        return this.createPptJob(userId, dto, totalCost);
       }
 
       // Image-first creative tools
@@ -112,15 +117,23 @@ export class StudioService {
         include: { outputFile: true },
       });
 
-      // Optional: animate still → video (credits already included above)
-      if (willAnimate && image.fileId) {
-        const videoJob = await this.createAnimateJob(
+      // Optional: animate still → timed video + voice (credits already included)
+      if (willAnimate && image.fileId && targetDuration) {
+        const videoJob = await this.createScriptedVideoJob(
           userId,
-          image.fileId,
+          {
+            ...dto,
+            characterImageFileIds: [
+              image.fileId,
+              ...(dto.characterImageFileIds || []),
+            ],
+            addAudio: true,
+            duration: targetDuration,
+          },
           enhanced,
-          dto,
+          videoBundleCost,
           mode,
-          animateCost,
+          targetDuration,
         );
         return { imageJob: this.format(job), videoJob, mode };
       }
@@ -152,31 +165,7 @@ export class StudioService {
     );
   }
 
-  /** Create I2V job without a second debit (studio already charged). */
-  private createAnimateJob(
-    userId: string,
-    inputFileId: string,
-    prompt: string,
-    dto: CreateStudioDto,
-    mode: CreativeMode,
-    _creditsCost: number,
-  ) {
-    return this.videos.createVideoJob(userId, {
-      jobType: JobType.IMAGE_TO_VIDEO,
-      inputFileId,
-      prompt,
-      projectId: dto.projectId,
-      skipCreditDebit: true,
-      settings: {
-        style: dto.style || 'anime',
-        aspect: dto.aspect || '9:16',
-        fromStudioMode: mode,
-        creditsPrepaid: true,
-      },
-    });
-  }
-
-  /** Long-form scripted video: segments + audio, billed once up front. */
+  /** Long-form scripted video: segments + required voice, billed once up front. */
   private createScriptedVideoJob(
     userId: string,
     dto: CreateStudioDto,
@@ -185,10 +174,14 @@ export class StudioService {
     mode: CreativeMode,
     targetDuration: 15 | 30 | 59,
   ) {
+    const characterFileIds = [...(dto.characterImageFileIds || [])];
     return this.videos.createVideoJob(userId, {
-      jobType: JobType.TEXT_TO_VIDEO,
+      jobType: characterFileIds.length
+        ? JobType.IMAGE_TO_VIDEO
+        : JobType.TEXT_TO_VIDEO,
       prompt: dto.prompt,
       projectId: dto.projectId,
+      inputFileId: characterFileIds[0],
       skipCreditDebit: true,
       settings: {
         mode,
@@ -198,13 +191,73 @@ export class StudioService {
         style: dto.style || 'cinematic',
         duration: targetDuration,
         targetDuration,
-        characterFileIds: dto.characterImageFileIds || [],
-        addAudio: dto.addAudio !== false,
+        characterFileIds,
+        addAudio: true,
         creditsPrepaid: true,
         prepaidCredits: cost,
         hidePipelineDetails: true,
       },
     });
+  }
+
+  private async createPptJob(
+    userId: string,
+    dto: CreateStudioDto,
+    cost: number,
+  ) {
+    const outline = await this.pptx.buildOutline(dto.prompt, dto.brandName);
+    const buffer = await this.pptx.renderPptx(outline.title, outline.slides);
+    const fileName = `${(outline.title || 'presentation')
+      .replace(/[^a-z0-9]+/gi, '_')
+      .slice(0, 40)}.pptx`;
+    const storageKey = this.storage.buildStorageKey(
+      userId,
+      `ppt_${Date.now()}`,
+      fileName,
+    );
+    await this.storage.uploadBuffer(
+      storageKey,
+      buffer,
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    );
+    const { downloadUrl, expiresAt } =
+      await this.storage.getDownloadUrl(storageKey);
+    const file = await this.prisma.videoFile.create({
+      data: {
+        type: 'OUTPUT',
+        originalName: fileName,
+        mimeType:
+          'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        sizeBytes: BigInt(buffer.length),
+        storageKey,
+        downloadUrl,
+        downloadUrlExpiresAt: expiresAt,
+      },
+    });
+    const job = await this.prisma.videoJob.create({
+      data: {
+        userId,
+        projectId: dto.projectId || null,
+        jobType: JobType.SCRIPT,
+        provider: 'pptxgenjs',
+        creditsCost: cost,
+        prompt: dto.prompt,
+        status: 'COMPLETED',
+        progress: 100,
+        currentStep: 'Completed',
+        completedAt: new Date(),
+        outputFileId: file.id,
+        settings: {
+          mode: CreativeMode.PPT,
+          brandName: dto.brandName,
+          resultUrl: downloadUrl,
+          slideCount: outline.slides.length,
+          title: outline.title,
+        },
+      },
+      include: { outputFile: true },
+    });
+    return this.format(job);
   }
 
   private async generateAndStoreImage(
@@ -289,6 +342,9 @@ export class StudioService {
     if (mode === CreativeMode.BRAND_KIT) {
       return (this.config.get<number>('credits.imageGenCost') ?? 4) * 2;
     }
+    if (mode === CreativeMode.PPT) {
+      return this.config.get<number>('credits.scriptCost') ?? 8;
+    }
     return this.config.get<number>('credits.imageGenCost') ?? 4;
   }
 
@@ -341,6 +397,10 @@ export class StudioService {
       [CreativeMode.INTERIOR]: {
         title: 'Space Designer',
         subtitle: 'Interior / room concepts',
+      },
+      [CreativeMode.PPT]: {
+        title: 'PPT Maker',
+        subtitle: 'AI PowerPoint decks (.pptx)',
       },
     };
     return map[mode];

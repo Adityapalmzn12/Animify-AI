@@ -6,6 +6,7 @@ import '../../../../core/network/api_client.dart';
 import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/app_text_field.dart';
 import '../../../../core/widgets/themed_choice_chip.dart';
+import '../../../../core/widgets/video_duration_chips.dart';
 
 class ScriptWriterPage extends ConsumerStatefulWidget {
   const ScriptWriterPage({super.key});
@@ -23,8 +24,6 @@ class _ScriptWriterPageState extends ConsumerState<ScriptWriterPage> {
   String? _script;
 
   static const _types = ['reel', 'youtube', 'ads', 'story', 'scene', 'podcast'];
-  static const _durations = [15, 30, 59];
-
   @override
   void dispose() {
     _promptController.dispose();
@@ -136,19 +135,9 @@ class _ScriptWriterPageState extends ConsumerState<ScriptWriterPage> {
                 .toList(),
           ),
           const SizedBox(height: 16),
-          Text('Video length', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            children: _durations
-                .map(
-                  (d) => ThemedChoiceChip(
-                    label: '${d}s',
-                    selected: _duration == d,
-                    onSelected: (_) => setState(() => _duration = d),
-                  ),
-                )
-                .toList(),
+          VideoDurationChips(
+            value: _duration,
+            onChanged: (d) => setState(() => _duration = d),
           ),
           const SizedBox(height: 24),
           AppButton(

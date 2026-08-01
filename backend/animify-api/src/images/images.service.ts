@@ -7,6 +7,7 @@ import { ConfigService } from '@nestjs/config';
 import { JobType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreditsService } from '../credits/credits.service';
+import { PricingService } from '../credits/pricing.service';
 import { VideosService } from '../videos/videos.service';
 import { AiProviderBus } from '../ai-providers/providers/ai-provider.bus';
 import { StorageService } from '../storage/storage.service';
@@ -30,13 +31,14 @@ export class ImagesService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly credits: CreditsService,
+    private readonly pricing: PricingService,
     private readonly videos: VideosService,
     private readonly bus: AiProviderBus,
     private readonly storage: StorageService,
   ) {}
 
   async generate(userId: string, dto: GenerateImageDto) {
-    const cost = this.config.get<number>('credits.imageGenCost') ?? 4;
+    const cost = await this.pricing.costFor('IMAGE_GEN', 4);
     await this.credits.debitCredits(userId, cost, undefined, 'Image generation');
 
     const stylePrompt = `${dto.prompt}, ${STYLE_HINTS[dto.style] || dto.style}, high quality, commercial ready`;

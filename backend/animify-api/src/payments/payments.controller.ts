@@ -19,6 +19,13 @@ import { CheckoutDto, PromoDto, WalletTopupDto } from './dto/payments.dto';
 export class PaymentsController {
   constructor(private readonly payments: PaymentsService) {}
 
+  /** Public plan packs + transparent credit rates (no margin fields). */
+  @Get('plans')
+  @Public()
+  plans() {
+    return this.payments.listPlans();
+  }
+
   @Post('checkout')
   @ApiBearerAuth()
   checkout(@CurrentUser('id') userId: string, @Body() dto: CheckoutDto) {

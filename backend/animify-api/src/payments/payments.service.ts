@@ -14,6 +14,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreditsService } from '../credits/credits.service';
+import { PricingService } from '../credits/pricing.service';
 import { CheckoutDto, PromoDto, WalletTopupDto } from './dto/payments.dto';
 
 @Injectable()
@@ -25,6 +26,7 @@ export class PaymentsService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly credits: CreditsService,
+    private readonly pricing: PricingService,
   ) {
     const secretKey = this.config.get<string>('payment.stripe.secretKey');
     if (secretKey) {
@@ -39,9 +41,25 @@ export class PaymentsService {
     return this.stripe;
   }
 
+  async listPlans() {
+    const pricing = await this.pricing.publicPricing();
+    return {
+      retailCreditInr: pricing.retailCreditInr,
+      plans: pricing.plans,
+      examples: pricing.examples,
+      video: pricing.video,
+      modules: pricing.modules,
+    };
+  }
+
   async createCheckoutSession(userId: string, dto: CheckoutDto) {
     const stripe = this.requireStripe();
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    const pricing = await this.pricing.publicPricing();
+    const plan =
+      pricing.plans.find((p) => p.id === (dto.planId || 'pro')) ||
+      pricing.plans.find((p) => p.popular) ||
+      pricing.plans[0];
 
     let customerId = (
       await this.prisma.subscription.findUnique({ where: { userId } })
@@ -70,7 +88,8 @@ export class PaymentsService {
       });
     }
 
-    const priceId = this.config.get<string>('payment.stripe.priceId');
+    const envPriceId = this.config.get<string>('payment.stripe.priceId');
+    const priceId = plan.stripePriceId || envPriceId;
     const successUrl =
       dto.successUrl ||
       this.config.get<string>('payment.stripe.successUrl') ||
@@ -85,19 +104,33 @@ export class PaymentsService {
       mode: 'subscription',
       success_url: successUrl,
       cancel_url: cancelUrl,
-      metadata: { userId, type: 'subscription' },
+      metadata: {
+        userId,
+        type: 'subscription',
+        planId: plan.id,
+        creditGrant: String(plan.credits),
+      },
+      subscription_data: {
+        metadata: {
+          userId,
+          planId: plan.id,
+          creditGrant: String(plan.credits),
+        },
+      },
     };
 
     if (priceId) {
       sessionParams.line_items = [{ price: priceId, quantity: 1 }];
     } else {
-      const amount = this.config.get<number>('limits.premiumPriceInr') ?? 49;
       sessionParams.line_items = [
         {
           price_data: {
             currency: 'inr',
-            product_data: { name: 'Animify Premium' },
-            unit_amount: amount * 100,
+            product_data: {
+              name: `Animify ${plan.name}`,
+              description: plan.description,
+            },
+            unit_amount: plan.priceInr * 100,
             recurring: { interval: 'month' },
           },
           quantity: 1,
@@ -106,7 +139,11 @@ export class PaymentsService {
     }
 
     const session = await stripe.checkout.sessions.create(sessionParams);
-    return { url: session.url, sessionId: session.id };
+    return {
+      url: session.url,
+      sessionId: session.id,
+      plan,
+    };
   }
 
   async createPortalSession(userId: string) {
@@ -168,8 +205,35 @@ export class PaymentsService {
       where: { stripeCustomerId: customerId },
     });
     if (!sub) return;
-    const premiumGrant =
+    const pricing = await this.pricing.publicPricing();
+    let planId = 'pro';
+    let premiumGrant =
       this.config.get<number>('credits.premiumMonthlyGrant') ?? 500;
+    try {
+      const stripe = this.requireStripe();
+      // Stripe typings vary by SDK version; subscription id lives on invoice parent/sub fields.
+      const inv = invoice as Stripe.Invoice & {
+        subscription?: string | Stripe.Subscription | null;
+        parent?: { subscription_details?: { subscription?: string } | null } | null;
+      };
+      const stripeSubId =
+        typeof inv.subscription === 'string'
+          ? inv.subscription
+          : inv.subscription?.id ||
+            inv.parent?.subscription_details?.subscription ||
+            null;
+      if (stripeSubId) {
+        const stripeSub = await stripe.subscriptions.retrieve(stripeSubId);
+        planId = stripeSub.metadata?.planId || planId;
+        const fromMeta = parseInt(stripeSub.metadata?.creditGrant || '', 10);
+        if (fromMeta > 0) premiumGrant = fromMeta;
+      }
+    } catch (e) {
+      this.logger.warn(`Could not read Stripe sub metadata for renewal: ${e}`);
+    }
+    const plan = pricing.plans.find((p) => p.id === planId);
+    if (plan?.credits) premiumGrant = plan.credits;
+
     const expiresAt = new Date();
     expiresAt.setMonth(expiresAt.getMonth() + 1);
     await this.prisma.subscription.update({
@@ -183,9 +247,9 @@ export class PaymentsService {
     await this.credits.grantCredits(
       sub.userId,
       premiumGrant,
-      'Premium monthly renewal credits',
-      'GRANT',
-      { source: 'stripe_invoice', invoiceId: invoice.id },
+      `Subscription renewal ${plan?.name || planId} — ${premiumGrant} credits`,
+      'PURCHASE',
+      { source: 'stripe_invoice', invoiceId: invoice.id, planId },
     );
   }
 
@@ -229,8 +293,14 @@ export class PaymentsService {
       return;
     }
 
+    const pricing = await this.pricing.publicPricing();
+    const planId = session.metadata?.planId || 'pro';
+    const plan = pricing.plans.find((p) => p.id === planId) || pricing.plans[0];
     const premiumGrant =
-      this.config.get<number>('credits.premiumMonthlyGrant') ?? 500;
+      parseInt(session.metadata?.creditGrant || '', 10) ||
+      plan?.credits ||
+      this.config.get<number>('credits.premiumMonthlyGrant') ||
+      500;
     const videoLimit = this.config.get<number>('limits.premiumVideoLimit') ?? 45;
     const minutesLimit =
       this.config.get<number>('limits.premiumMinutesLimit') ?? 450;
@@ -272,9 +342,13 @@ export class PaymentsService {
     await this.credits.grantCredits(
       userId,
       premiumGrant,
-      'Premium subscription grant',
-      'GRANT',
-      { source: 'stripe_checkout', sessionId: session.id },
+      `Subscription ${plan?.name || 'Premium'} — ${premiumGrant} credits`,
+      'PURCHASE',
+      {
+        source: 'stripe_checkout',
+        sessionId: session.id,
+        planId,
+      },
     );
 
     const amount = (session.amount_total ?? 0) / 100;
@@ -332,6 +406,9 @@ export class PaymentsService {
   async walletTopup(userId: string, dto: WalletTopupDto) {
     const stripe = this.requireStripe();
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    const pricing = await this.pricing.publicPricing();
+    const unitInr = pricing.retailCreditInr || 1;
+    const amountInr = Math.round(dto.credits * unitInr * 100) / 100;
     const successUrl =
       dto.successUrl ||
       this.config.get<string>('payment.stripe.successUrl') ||
@@ -350,13 +427,17 @@ export class PaymentsService {
         userId,
         type: 'wallet_topup',
         credits: String(dto.credits),
+        retailCreditInr: String(unitInr),
       },
       line_items: [
         {
           price_data: {
             currency: 'inr',
-            product_data: { name: `${dto.credits} Animify Credits` },
-            unit_amount: dto.credits * 100,
+            product_data: {
+              name: `${dto.credits} Animify Credits`,
+              description: `₹${unitInr} per Animify credit`,
+            },
+            unit_amount: Math.max(100, Math.round(amountInr * 100)),
           },
           quantity: 1,
         },
@@ -366,16 +447,20 @@ export class PaymentsService {
     await this.prisma.payment.create({
       data: {
         userId,
-        amount: dto.credits,
+        amount: amountInr,
         currency: 'INR',
         status: PaymentStatus.PENDING,
         provider: PaymentProvider.STRIPE,
         providerId: session.id,
-        metadata: { type: 'wallet_topup', credits: dto.credits },
+        metadata: {
+          type: 'wallet_topup',
+          credits: dto.credits,
+          retailCreditInr: unitInr,
+        },
       },
     });
 
-    return { url: session.url, sessionId: session.id };
+    return { url: session.url, sessionId: session.id, amountInr, credits: dto.credits };
   }
 
   async listInvoices(userId: string, page = 1, limit = 20) {

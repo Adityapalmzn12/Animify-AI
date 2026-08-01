@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { JobType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreditsService } from '../credits/credits.service';
+import { PricingService } from '../credits/pricing.service';
 import { StorageService } from '../storage/storage.service';
 import { AiProviderBus } from '../ai-providers/providers/ai-provider.bus';
 import { VideosService } from '../videos/videos.service';
@@ -22,18 +23,29 @@ export class StudioService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly credits: CreditsService,
+    private readonly pricing: PricingService,
     private readonly storage: StorageService,
     private readonly bus: AiProviderBus,
     private readonly videos: VideosService,
     private readonly pptx: PptxService,
   ) {}
 
-  modes() {
-    return Object.values(CreativeMode).map((mode) => ({
-      mode,
-      ...this.modeMeta(mode),
-      credits: this.costFor(mode),
-    }));
+  async modes() {
+    const pricing = await this.pricing.publicPricing();
+    const modes = Object.values(CreativeMode);
+    return Promise.all(
+      modes.map(async (mode) => ({
+        mode,
+        ...this.modeMeta(mode),
+        credits: await this.costFor(mode),
+        // Transparent: video modes also expose 10/30/60s rates
+        videoCredits:
+          mode === CreativeMode.PROMPT_TO_VIDEO ||
+          mode === CreativeMode.STORY_REEL
+            ? pricing.video
+            : undefined,
+      })),
+    );
   }
 
   async create(userId: string, dto: CreateStudioDto) {
@@ -41,7 +53,6 @@ export class StudioService {
     // Auto-top-up for empty wallets so launch users can generate immediately
     await this.ensureLaunchCredits(userId);
 
-    const imageCost = this.costFor(mode);
     const willAnimate =
       !!dto.animate &&
       mode !== CreativeMode.PROMPT_TO_VIDEO &&
@@ -52,15 +63,10 @@ export class StudioService {
       isScriptedVideo || willAnimate
         ? StoryPipelineService.normalizeDuration(dto.duration)
         : undefined;
-    const segmentCount = targetDuration
-      ? StoryPipelineService.segmentPlan(targetDuration).length
-      : 1;
-    const perClip =
-      this.config.get<number>('credits.imageToVideoCost') ?? 15;
-    const voiceCost = this.config.get<number>('credits.voiceCost') ?? 3;
+    const imageCost = await this.costFor(mode, targetDuration);
     const videoBundleCost =
       isScriptedVideo || willAnimate
-        ? segmentCount * perClip + voiceCost
+        ? await this.storyCredits(targetDuration || 30)
         : 0;
     const totalCost = isScriptedVideo
       ? videoBundleCost
@@ -172,7 +178,7 @@ export class StudioService {
     enhanced: string,
     cost: number,
     mode: CreativeMode,
-    targetDuration: 15 | 30 | 59,
+    targetDuration: 10 | 30 | 60,
   ) {
     const characterFileIds = [...(dto.characterImageFileIds || [])];
     return this.videos.createVideoJob(userId, {
@@ -332,20 +338,24 @@ export class StudioService {
     return `${base} ${dto.prompt}.${brand}${colors}${extra} High quality, commercial-ready, sharp details.`.trim();
   }
 
-  private costFor(mode: CreativeMode): number {
+  private async storyCredits(durationSec: number) {
+    return this.pricing.storyCredits(durationSec);
+  }
+
+  private async costFor(
+    mode: CreativeMode,
+    durationSec?: number,
+  ): Promise<number> {
     if (mode === CreativeMode.PROMPT_TO_VIDEO || mode === CreativeMode.STORY_REEL) {
-      // Default quote for 30s scripted story (~3 clips)
-      const perClip =
-        this.config.get<number>('credits.imageToVideoCost') ?? 15;
-      return perClip * 3 + (this.config.get<number>('credits.voiceCost') ?? 3);
+      return this.storyCredits(durationSec || 30);
     }
     if (mode === CreativeMode.BRAND_KIT) {
-      return (this.config.get<number>('credits.imageGenCost') ?? 4) * 2;
+      return this.pricing.costFor('BRAND_KIT', 8);
     }
     if (mode === CreativeMode.PPT) {
-      return this.config.get<number>('credits.scriptCost') ?? 8;
+      return this.pricing.costFor('PPT', 8);
     }
-    return this.config.get<number>('credits.imageGenCost') ?? 4;
+    return this.pricing.costFor('IMAGE_GEN', 4);
   }
 
   private modeMeta(mode: CreativeMode) {

@@ -13,6 +13,7 @@ import { resolveStyleProfile } from '../ai-providers/styles.config';
 import { CreateVideoJobDto } from './dto/create-video-job.dto';
 import { ConfigService } from '@nestjs/config';
 import { CreditsService } from '../credits/credits.service';
+import { PricingService } from '../credits/pricing.service';
 import { QueueService } from '../queue/queue.service';
 import { JobType } from '@prisma/client';
 
@@ -25,29 +26,32 @@ export class VideosService {
     private readonly configService: ConfigService,
     private readonly storageService: StorageService,
     private readonly creditsService: CreditsService,
+    private readonly pricing: PricingService,
     @Optional() @Inject(forwardRef(() => QueueService))
     private readonly queueService?: QueueService,
   ) {}
 
-  private creditCostFor(jobType: JobType): number {
-    const map: Record<string, string> = {
-      STYLIZE: 'credits.stylizeCost',
-      TEXT_TO_VIDEO: 'credits.textToVideoCost',
-      IMAGE_TO_VIDEO: 'credits.imageToVideoCost',
-      AVATAR: 'credits.avatarCost',
-      DUB: 'credits.dubCost',
-      SUBTITLE: 'credits.subtitleCost',
-      VOICE: 'credits.voiceCost',
-      SCRIPT: 'credits.scriptCost',
-      IMAGE_GEN: 'credits.imageGenCost',
-      BG_REMOVE: 'credits.bgRemoveCost',
-      EDIT_TRIM: 'credits.editCost',
-      EDIT_MERGE: 'credits.editCost',
-      EDIT_CROP: 'credits.editCost',
-      EDIT_FILTER: 'credits.editCost',
-      EDIT_EXPORT: 'credits.editCost',
+  private async creditCostFor(jobType: JobType): Promise<number> {
+    const keyMap: Record<string, string> = {
+      STYLIZE: 'STYLIZE',
+      TEXT_TO_VIDEO: 'TEXT_TO_VIDEO',
+      IMAGE_TO_VIDEO: 'IMAGE_TO_VIDEO',
+      AVATAR: 'TEXT_TO_VIDEO',
+      DUB: 'VOICE',
+      SUBTITLE: 'SCRIPT',
+      VOICE: 'VOICE',
+      SCRIPT: 'SCRIPT',
+      IMAGE_GEN: 'IMAGE_GEN',
+      BG_REMOVE: 'BG_REMOVE',
+      EDIT_TRIM: 'EDIT',
+      EDIT_MERGE: 'EDIT',
+      EDIT_CROP: 'EDIT',
+      EDIT_FILTER: 'EDIT',
+      EDIT_EXPORT: 'EDIT',
     };
-    return this.configService.get<number>(map[jobType] || 'credits.stylizeCost') ?? 5;
+    const fallback =
+      this.configService.get<number>('credits.stylizeCost') ?? 5;
+    return this.pricing.costFor(keyMap[jobType] || 'STYLIZE', fallback);
   }
 
   async createVideoJob(userId: string, dto: CreateVideoJobDto) {
@@ -108,7 +112,7 @@ export class VideosService {
     const creditsCost =
       settings.pipeline === 'scripted_story' && scriptedCredits > 0
         ? scriptedCredits
-        : this.creditCostFor(jobType);
+        : await this.creditCostFor(jobType);
     if (!prepaid) {
       await this.creditsService.debitCredits(
         userId,

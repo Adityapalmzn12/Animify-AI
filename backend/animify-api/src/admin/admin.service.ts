@@ -7,10 +7,13 @@ import { Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiProviderBus } from '../ai-providers/providers/ai-provider.bus';
 import { CreditsService } from '../credits/credits.service';
+import { PricingService } from '../credits/pricing.service';
 import {
+  AdjustCreditsDto,
   CreateCouponDto,
   GrantCreditsDto,
   UpdateAdminUserDto,
+  UpdatePricingDto,
   UpsertFeatureFlagDto,
 } from './dto/admin.dto';
 
@@ -31,6 +34,7 @@ export class AdminService {
     private readonly prisma: PrismaService,
     private readonly bus: AiProviderBus,
     private readonly credits: CreditsService,
+    private readonly pricing: PricingService,
     private readonly config: ConfigService,
   ) {}
 
@@ -532,6 +536,30 @@ export class AdminService {
       'GRANT',
       { source: 'admin' },
     );
+  }
+
+  async adjustCredits(userId: string, dto: AdjustCreditsDto) {
+    await this.getUserOrThrow(userId);
+    return this.credits.adjustCredits(userId, {
+      delta: dto.delta,
+      setTo: dto.setTo,
+      reason: dto.reason,
+    });
+  }
+
+  getPricing() {
+    return this.pricing.adminPricing();
+  }
+
+  updatePricing(dto: UpdatePricingDto) {
+    // Margin is internal (default 55%) — never driven from admin UI fields.
+    const { marginPercent: _ignore, ...rest } = dto as UpdatePricingDto & {
+      marginPercent?: number;
+    };
+    return this.pricing.saveConfig({
+      ...rest,
+      recomputeFromProviderCosts: dto.recomputeFromProviderCosts,
+    });
   }
 
   async listSubscriptions(page = 1, limit = 20) {

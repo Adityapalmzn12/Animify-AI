@@ -7,6 +7,7 @@ import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/app_text_field.dart';
 import '../../../../core/widgets/themed_choice_chip.dart';
 import '../../../../core/widgets/video_duration_chips.dart';
+import '../../../wallet/presentation/providers/pricing_provider.dart';
 
 class ScriptWriterPage extends ConsumerStatefulWidget {
   const ScriptWriterPage({super.key});
@@ -138,6 +139,8 @@ class _ScriptWriterPageState extends ConsumerState<ScriptWriterPage> {
           VideoDurationChips(
             value: _duration,
             onChanged: (d) => setState(() => _duration = d),
+            creditsByDuration:
+                ref.watch(creditPricingProvider).valueOrNull?.videoCredits,
           ),
           const SizedBox(height: 24),
           AppButton(

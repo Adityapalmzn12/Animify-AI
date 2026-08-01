@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { JobType } from '@prisma/client';
 import { VideosService } from '../videos/videos.service';
 import { AiProviderBus } from '../ai-providers/providers/ai-provider.bus';
 import { StoryPipelineService } from '../ai-providers/story-pipeline.service';
+import { PricingService } from '../credits/pricing.service';
 import { CreateGeneratorJobDto } from './dto/create-generator-job.dto';
 
 @Injectable()
@@ -11,15 +11,26 @@ export class GeneratorService {
   constructor(
     private readonly videos: VideosService,
     private readonly bus: AiProviderBus,
-    private readonly config: ConfigService,
+    private readonly pricing: PricingService,
   ) {}
 
   providers() {
     return this.bus.listConfigured();
   }
 
-  estimate(jobType: string, settings?: Record<string, unknown>) {
-    return { credits: this.bus.estimate(jobType, settings) };
+  async estimate(jobType: string, settings?: Record<string, unknown>) {
+    const duration = StoryPipelineService.normalizeDuration(
+      Number(settings?.duration) || undefined,
+    );
+    if (
+      jobType === JobType.TEXT_TO_VIDEO ||
+      jobType === JobType.IMAGE_TO_VIDEO
+    ) {
+      return { credits: await this.storyCredits(duration) };
+    }
+    return {
+      credits: await this.pricing.costFor(jobType, this.bus.estimate(jobType, settings)),
+    };
   }
 
   async create(userId: string, dto: CreateGeneratorJobDto) {
@@ -43,11 +54,7 @@ export class GeneratorService {
     }
 
     const targetDuration = StoryPipelineService.normalizeDuration(dto.duration);
-    const segments = StoryPipelineService.segmentPlan(targetDuration).length;
-    const perClip =
-      this.config.get<number>('credits.imageToVideoCost') ?? 15;
-    const voiceCost = this.config.get<number>('credits.voiceCost') ?? 3;
-    const prepaidCredits = segments * perClip + voiceCost;
+    const prepaidCredits = await this.storyCredits(targetDuration);
     const characterFileIds = dto.inputFileId ? [dto.inputFileId] : [];
 
     return this.videos.createVideoJob(userId, {
@@ -69,5 +76,9 @@ export class GeneratorService {
         hidePipelineDetails: true,
       },
     });
+  }
+
+  private async storyCredits(durationSec: number) {
+    return this.pricing.storyCredits(durationSec);
   }
 }

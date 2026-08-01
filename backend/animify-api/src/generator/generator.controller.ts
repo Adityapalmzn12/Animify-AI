@@ -20,8 +20,13 @@ export class GeneratorController {
 
   @Get('estimate')
   @ApiOperation({ summary: 'Estimate credit cost for a job type' })
-  estimate(@Query('jobType') jobType = 'TEXT_TO_VIDEO') {
-    return this.generator.estimate(jobType);
+  estimate(
+    @Query('jobType') jobType = 'TEXT_TO_VIDEO',
+    @Query('duration') duration?: string,
+  ) {
+    return this.generator.estimate(jobType, {
+      duration: duration ? Number(duration) : undefined,
+    });
   }
 
   @Post()

@@ -37,6 +37,72 @@ export class GrantCreditsDto {
   reason?: string;
 }
 
+export class AdjustCreditsDto {
+  @ApiPropertyOptional({
+    description: 'Positive to add, negative to remove (fix mistaken grants)',
+    example: -50,
+  })
+  @IsOptional()
+  @IsInt()
+  delta?: number;
+
+  @ApiPropertyOptional({
+    description: 'Set absolute wallet balance',
+    example: 200,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  setTo?: number;
+
+  @ApiProperty({ example: 'Corrected mistaken grant' })
+  @IsString()
+  @MinLength(3)
+  @MaxLength(200)
+  reason: string;
+}
+
+export class UpdatePricingDto {
+  @ApiPropertyOptional({ example: 60 })
+  @IsOptional()
+  marginPercent?: number;
+
+  @ApiPropertyOptional({ example: 1 })
+  @IsOptional()
+  retailCreditInr?: number;
+
+  @ApiPropertyOptional({
+    description: 'Override user credit prices per action key',
+  })
+  @IsOptional()
+  @IsObject()
+  costs?: Record<string, number>;
+
+  @ApiPropertyOptional({
+    description: 'Provider INR cost estimates; used when recomputeFromProviderCosts=true',
+  })
+  @IsOptional()
+  @IsObject()
+  providerCosts?: Record<string, number>;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  recomputeFromProviderCosts?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  plans?: Array<{
+    id: string;
+    name: string;
+    priceInr: number;
+    credits: number;
+    description: string;
+    popular?: boolean;
+    stripePriceId?: string | null;
+  }>;
+}
+
 export class UpsertFeatureFlagDto {
   @ApiProperty()
   @IsString()

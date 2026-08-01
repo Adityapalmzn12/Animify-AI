@@ -1,83 +1,119 @@
-# Billing, credits & which APIs to buy
+# Billing, credits & API consumption (transparent)
 
-## Product model (how money flows)
+## Money flow
 
 ```
 You buy AI APIs (Replicate / OpenAI / Fal…)
         ↓
-Animify API debits user credits per job
+Animify debits user wallet credits per module (rates below)
         ↓
 Users get credits from:
   1) Signup grant
-  2) Premium subscription (monthly grant → wallet)
-  3) Wallet top-up (Stripe one-time)
-  4) Promo codes / Admin grants
+  2) Subscription pack (Stripe → Premium + wallet grant)
+  3) Wallet top-up
+  4) Promo / Admin grant / Admin adjust
 ```
 
-Users never call AI providers directly. **You** hold the API keys; **users** spend wallet credits.
-
-When credits hit 0 → generation returns `Insufficient credits` → user opens **Wallet → Buy credits** or **Subscription → Premium**.
-
----
-
-## What you need to buy / configure
-
-| Service | Why | Where | Env vars (Railway) |
-|--------|-----|--------|---------------------|
-| **Stripe** | Subscriptions + credit top-ups | https://dashboard.stripe.com | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_ID` (Premium monthly price), success/cancel URLs |
-| **Replicate** | Video + image (primary after Fal lock) | https://replicate.com/account/billing | `REPLICATE_API_TOKEN` |
-| **OpenAI** | Images (`gpt-image-1`), scripts, TTS voice | https://platform.openai.com/account/billing | `OPENAI_API_KEY`, optional `OPENAI_IMAGE_MODEL=gpt-image-1` |
-| **Fal** (optional) | Extra video/image capacity | https://fal.ai/dashboard/billing | `FAL_API_KEY` |
-| **ElevenLabs** (optional) | Higher-quality TTS | https://elevenlabs.io | `ELEVENLABS_API_KEY` |
-| **Supabase** | File storage for outputs | https://supabase.com | already used for storage |
-| **Redis** | Job queue (Bull) | Railway Redis | `REDIS_*` |
-| **Postgres** | Users, ledger, subs | Railway Postgres | `DATABASE_URL` |
-
-Minimum to sell the app: **Stripe + Replicate + Postgres + Redis + Supabase**.  
-OpenAI strongly recommended for PPT outlines + voice.
-
-### Stripe setup checklist
-
-1. Create Product **Animify Premium** → recurring monthly Price → copy Price ID → `STRIPE_PRICE_ID`.
-2. Developers → Webhooks → endpoint  
-   `https://<your-api>/api/v1/payments/webhook/stripe`  
-   Events: `checkout.session.completed`, `invoice.paid`, `customer.subscription.deleted`.
-3. Customer Portal enabled (Billing → Customer portal).
-4. Test with Stripe test keys first, then live keys.
-
-### Credit pricing (current defaults)
-
-- Wallet top-up: **₹1 / credit** (Stripe `unit_amount = credits * 100` paise).
-- Premium grant: **500 credits / month** (`CREDITS_PREMIUM_MONTHLY`).
-- Example costs: image ~4, short I2V clip ~15, voice ~3, PPT ~8, 30s story ≈ 3×15 + 3.
-
-Tune in Railway env / `configuration.ts`.
+**Customers and Admin UI never see margin math.**  
+Internal cost cut is fixed at **55%** (`BILLING_MARGIN_PERCENT=55`) when resetting default rates.
 
 ---
 
-## App surfaces
+## Video credits (customer-facing)
 
-| Screen | Action |
-|--------|--------|
-| **Subscription** | Stripe Checkout → Premium; Portal to cancel/manage |
-| **Wallet** | Balance + ledger + Buy credits packs + Promo |
-| **Admin → Users** | Grant credits; see plan + balance |
-| **Creative Studio** | Includes **PPT Maker** (`.pptx` download) |
+| Length | Key | Credits used (default) |
+|--------|-----|------------------------|
+| **10 seconds** | `STORY_10` | **25** |
+| **30 seconds** | `STORY_30` | **49** |
+| **60 seconds** | `STORY_60` | **94** |
 
-Credits update in Wallet after Stripe webhook completes (pull-to-refresh).
-
----
-
-## Admin ops
-
-1. Promote a user: set `role = ADMIN` in DB (or via `PATCH /admin/users/:id`).
-2. Grant credits: Admin app → Users → + card, or  
-   `POST /admin/users/:id/credits` `{ "amount": 200, "reason": "Support" }`.
-3. Coupons: `POST /admin/coupons` with `creditGrant`.
-4. Metrics: `GET /admin/metrics` (users, jobs, revenue, credits in circulation).
+Includes scripted scenes + automatic voice. Shown on duration chips and Wallet → Credit usage guide.
 
 ---
 
-## PPT
+## Module credit usage (transparent)
 
-Creative Studio mode **`ppt`** → AI outline → `.pptx` uploaded to storage → `resultUrl` download. Costs script credits.
+| Module | Key | Credits (default) | Who uses it |
+|--------|-----|-------------------|-------------|
+| Video 10s | STORY_10 | 25 | T2V / I2V / Studio story |
+| Video 30s | STORY_30 | 49 | same |
+| Video 60s | STORY_60 | 94 | same |
+| Image generation | IMAGE_GEN | 4 | Logo, fashion, Ghibli, anime, product… |
+| Brand kit | BRAND_KIT | 8 | Two branded images |
+| PPT maker | PPT | 5 | `.pptx` export |
+| Image → short clip | IMAGE_TO_VIDEO | 14 | Single clip path |
+| Text → short clip | TEXT_TO_VIDEO | 18 | Single clip path |
+| Script | SCRIPT | 2 | Script writing |
+| Voice | VOICE | 3 | Standalone TTS (usually in video bundle) |
+| Stylize | STYLIZE | 5 | Style tools |
+| BG remove | BG_REMOVE | 3 | Cutout |
+| Edit tools | EDIT | 2 | Trim / merge / crop |
+
+Live rates: `GET /credits/pricing` (no margin fields).  
+Admin edit: Next.js → **Credit usage** → `PATCH /admin/pricing` `{ "costs": { "STORY_30": 55 } }`.
+
+---
+
+## Customer end
+
+| Surface | What they see |
+|---------|----------------|
+| **Wallet** | Balance + **Credit usage guide** (10/30/60s + module list) |
+| **Duration chips** | `30s · 49 cr` before generate |
+| **Studio modes** | Credits per mode from API |
+| **Ledger** | Every debit/credit with reason |
+
+They do **not** see margin %, provider ₹, or COGS.
+
+---
+
+## Admin end
+
+| Surface | What they manage |
+|---------|------------------|
+| **Credit usage** | Edit credits per module (same numbers customers see) |
+| **Users** | Grant / Adjust ± / Set balance (fix mistakes) |
+| **Subscriptions** | Who is Premium |
+| **Ops / Buy APIs** | Which provider wallet to top up |
+
+They edit **credit rates**, not margin. Reset defaults rebuilds rates with the internal 55% cut.
+
+---
+
+## Subscription packs
+
+| Pack | Price | Credits granted |
+|------|-------|-----------------|
+| Creator | ₹499/mo | 499 |
+| Pro | ₹999/mo | 999 |
+| Studio | ₹2499/mo | 2499 |
+
+`POST /payments/checkout` `{ "planId": "pro" }` → webhook updates Premium + wallet.
+
+---
+
+## APIs to buy
+
+| Service | Why |
+|--------|-----|
+| Stripe | Subs + top-ups |
+| Replicate | Video + image |
+| OpenAI | Scripts + voice |
+| Fal / ElevenLabs | Optional capacity / TTS |
+| Supabase + Redis + Postgres | Storage, queue, DB |
+
+Webhook: `https://<api>/api/v1/payments/webhook/stripe`
+
+---
+
+## Env
+
+```
+BILLING_MARGIN_PERCENT=55
+CREDIT_INR=1
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+REPLICATE_API_TOKEN=
+OPENAI_API_KEY=
+AI_PROVIDER=replicate
+```

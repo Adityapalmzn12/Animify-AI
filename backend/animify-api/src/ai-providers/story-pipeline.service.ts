@@ -32,11 +32,12 @@ export class StoryPipelineService {
     private readonly replicate: ReplicateProvider,
   ) {}
 
-  static normalizeDuration(raw?: number): 15 | 30 | 59 {
+  static normalizeDuration(raw?: number): 10 | 30 | 60 {
     const n = Number(raw) || 30;
-    if (n <= 15) return 15;
+    // Legacy 15 → 10, 59 → 60
+    if (n <= 12 || n === 15) return 10;
     if (n <= 30) return 30;
-    return 59;
+    return 60;
   }
 
   static segmentPlan(totalSec: number): number[] {

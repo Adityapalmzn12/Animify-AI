@@ -8,6 +8,7 @@ import '../../../../core/network/api_client.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/async_state_views.dart';
 import '../../../../core/widgets/themed_choice_chip.dart';
+import '../providers/pricing_provider.dart';
 import '../providers/wallet_provider.dart';
 
 class WalletPage extends ConsumerStatefulWidget {
@@ -98,6 +99,7 @@ class _WalletPageState extends ConsumerState<WalletPage> {
     final l10n = AppLocalizations.of(context);
     final balanceAsync = ref.watch(creditBalanceProvider);
     final ledgerAsync = ref.watch(creditLedgerProvider);
+    final pricingAsync = ref.watch(creditPricingProvider);
     final dateFormat = DateFormat.MMMd().add_jm();
 
     return Scaffold(
@@ -106,6 +108,7 @@ class _WalletPageState extends ConsumerState<WalletPage> {
         onRefresh: () async {
           ref.invalidate(creditBalanceProvider);
           ref.invalidate(creditLedgerProvider);
+          ref.invalidate(creditPricingProvider);
         },
         child: ListView(
           padding: const EdgeInsets.all(16),
@@ -145,6 +148,78 @@ class _WalletPageState extends ConsumerState<WalletPage> {
                     ],
                   ),
                 ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'Credit usage guide',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Exactly how many credits each create uses — same as admin rates.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            pricingAsync.when(
+              loading: () => const SkeletonList(itemCount: 2, itemHeight: 48),
+              error: (_, __) => Text(
+                'Could not load credit rates.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              data: (pricing) => Column(
+                children: [
+                  Row(
+                    children: [
+                      for (final d in [10, 30, 60])
+                        Expanded(
+                          child: Card(
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Column(
+                                children: [
+                                  Text(
+                                    '${d}s video',
+                                    style: Theme.of(context).textTheme.labelMedium,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '${pricing.videoCredits[d] ?? '—'}',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleLarge
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.bold,
+                                          color: AppColors.primary,
+                                        ),
+                                  ),
+                                  Text(
+                                    'credits',
+                                    style: Theme.of(context).textTheme.bodySmall,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  ...pricing.modules.take(8).map(
+                        (m) => ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(m['module']?.toString() ?? m['key']?.toString() ?? ''),
+                          subtitle: Text(m['description']?.toString() ?? ''),
+                          trailing: Text(
+                            '${m['credits']} cr',
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ),
+                ],
               ),
             ),
             const SizedBox(height: 24),

@@ -10,6 +10,14 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CheckoutDto {
+  @ApiPropertyOptional({
+    description: 'Plan pack id from GET /payments/plans (creator|pro|studio)',
+    example: 'pro',
+  })
+  @IsOptional()
+  @IsString()
+  planId?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsUrl()

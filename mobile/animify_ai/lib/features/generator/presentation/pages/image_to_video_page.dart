@@ -10,6 +10,7 @@ import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/app_text_field.dart';
 import '../../../../core/widgets/themed_choice_chip.dart';
 import '../../../../core/widgets/video_duration_chips.dart';
+import '../../../wallet/presentation/providers/pricing_provider.dart';
 
 class ImageToVideoPage extends ConsumerStatefulWidget {
   const ImageToVideoPage({super.key});
@@ -197,6 +198,8 @@ class _ImageToVideoPageState extends ConsumerState<ImageToVideoPage> {
               VideoDurationChips(
                 value: _duration,
                 onChanged: (d) => setState(() => _duration = d),
+                creditsByDuration:
+                    ref.watch(creditPricingProvider).valueOrNull?.videoCredits,
               ),
               const SizedBox(height: 24),
               Text('Aspect', style: Theme.of(context).textTheme.titleSmall),

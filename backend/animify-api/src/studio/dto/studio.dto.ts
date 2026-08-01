@@ -91,13 +91,13 @@ export class CreateStudioDto {
   aspect?: string;
 
   @ApiPropertyOptional({
-    description: 'Target video length in seconds (15 | 30 | 59)',
+    description: 'Target video length in seconds (10 | 30 | 60)',
     example: 30,
   })
   @IsOptional()
   @IsInt()
-  @Min(15)
-  @Max(59)
+  @Min(10)
+  @Max(60)
   duration?: number;
 
   @ApiPropertyOptional({

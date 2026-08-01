@@ -13,11 +13,15 @@ type UserRow = {
   subscription?: { planType?: string; status?: string };
 };
 
+type AdjustMode = "grant" | "delta" | "set";
+
 export default function UsersPage() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [error, setError] = useState("");
-  const [grantUser, setGrantUser] = useState<UserRow | null>(null);
+  const [target, setTarget] = useState<UserRow | null>(null);
+  const [mode, setMode] = useState<AdjustMode>("grant");
   const [amount, setAmount] = useState("100");
+  const [reason, setReason] = useState("Admin correction");
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -33,22 +37,55 @@ export default function UsersPage() {
     load();
   }, [load]);
 
-  async function grant(e: FormEvent) {
+  function open(u: UserRow, m: AdjustMode) {
+    setTarget(u);
+    setMode(m);
+    setAmount(m === "set" ? String(u.creditBalance ?? 0) : m === "delta" ? "-50" : "100");
+    setReason(
+      m === "grant"
+        ? "Admin grant from Next.js panel"
+        : m === "set"
+          ? "Set balance after mistaken credit"
+          : "Correct mistaken grant",
+    );
+    setError("");
+  }
+
+  async function submit(e: FormEvent) {
     e.preventDefault();
-    if (!grantUser) return;
+    if (!target) return;
     setBusy(true);
+    setError("");
     try {
-      await api(`/admin/users/${grantUser.id}/credits`, {
-        method: "POST",
-        body: JSON.stringify({
-          amount: Number(amount),
-          reason: "Admin grant from Next.js panel",
-        }),
-      });
-      setGrantUser(null);
+      if (mode === "grant") {
+        await api(`/admin/users/${target.id}/credits`, {
+          method: "POST",
+          body: JSON.stringify({
+            amount: Number(amount),
+            reason,
+          }),
+        });
+      } else if (mode === "delta") {
+        await api(`/admin/users/${target.id}/credits/adjust`, {
+          method: "POST",
+          body: JSON.stringify({
+            delta: Number(amount),
+            reason,
+          }),
+        });
+      } else {
+        await api(`/admin/users/${target.id}/credits/adjust`, {
+          method: "POST",
+          body: JSON.stringify({
+            setTo: Number(amount),
+            reason,
+          }),
+        });
+      }
+      setTarget(null);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Grant failed");
+      setError(err instanceof Error ? err.message : "Update failed");
     } finally {
       setBusy(false);
     }
@@ -59,7 +96,8 @@ export default function UsersPage() {
       <header>
         <h1 className="font-display text-3xl md:text-4xl">Users</h1>
         <p className="text-muted text-sm mt-1">
-          Grant credits when a subscriber needs more than their plan.
+          Grant, subtract, or set wallet balance — fix mistaken credits without
+          touching Stripe.
         </p>
       </header>
       {error ? <div className="panel p-4 text-[var(--bad)]">{error}</div> : null}
@@ -84,9 +122,15 @@ export default function UsersPage() {
                 <td className="p-3">{u.subscription?.planType || "NONE"}</td>
                 <td className="p-3">{u.creditBalance ?? 0}</td>
                 <td className="p-3">{u.role}</td>
-                <td className="p-3 text-right">
-                  <button className="btn btn-ghost" onClick={() => setGrantUser(u)}>
-                    Grant credits
+                <td className="p-3 text-right space-x-2 whitespace-nowrap">
+                  <button className="btn btn-ghost" onClick={() => open(u, "grant")}>
+                    Grant
+                  </button>
+                  <button className="btn btn-ghost" onClick={() => open(u, "delta")}>
+                    Adjust ±
+                  </button>
+                  <button className="btn btn-ghost" onClick={() => open(u, "set")}>
+                    Set
                   </button>
                 </td>
               </tr>
@@ -95,24 +139,55 @@ export default function UsersPage() {
         </table>
       </div>
 
-      {grantUser ? (
+      {target ? (
         <div className="fixed inset-0 bg-black/60 grid place-items-center p-4 z-50">
-          <form onSubmit={grant} className="panel w-full max-w-md p-6 space-y-4">
-            <h2 className="text-xl font-semibold">Grant credits</h2>
-            <p className="text-sm text-muted">{grantUser.email}</p>
-            <input
-              className="input"
-              type="number"
-              min={1}
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-            />
+          <form onSubmit={submit} className="panel w-full max-w-md p-6 space-y-4">
+            <h2 className="text-xl font-semibold">
+              {mode === "grant"
+                ? "Grant credits"
+                : mode === "delta"
+                  ? "Adjust credits (±)"
+                  : "Set absolute balance"}
+            </h2>
+            <p className="text-sm text-muted">
+              {target.email} · current {target.creditBalance ?? 0}
+            </p>
+            <label className="block space-y-1">
+              <span className="text-xs text-muted">
+                {mode === "delta"
+                  ? "Delta (e.g. -50 removes, +50 adds)"
+                  : mode === "set"
+                    ? "New balance"
+                    : "Amount to grant"}
+              </span>
+              <input
+                className="input"
+                type="number"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                required
+              />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs text-muted">Reason (audit log)</span>
+              <input
+                className="input"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                minLength={3}
+                required
+              />
+            </label>
             <div className="flex gap-2 justify-end">
-              <button type="button" className="btn btn-ghost" onClick={() => setGrantUser(null)}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setTarget(null)}
+              >
                 Cancel
               </button>
               <button className="btn btn-primary" disabled={busy}>
-                {busy ? "Granting…" : "Grant"}
+                {busy ? "Saving…" : "Apply"}
               </button>
             </div>
           </form>

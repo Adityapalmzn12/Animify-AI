@@ -12,9 +12,11 @@ import { UserRole } from '@prisma/client';
 import { AdminService } from './admin.service';
 import { Roles } from '../common/decorators/roles.decorator';
 import {
+  AdjustCreditsDto,
   CreateCouponDto,
   GrantCreditsDto,
   UpdateAdminUserDto,
+  UpdatePricingDto,
   UpsertFeatureFlagDto,
 } from './dto/admin.dto';
 
@@ -49,6 +51,22 @@ export class AdminController {
   @Post('users/:id/credits')
   grantCredits(@Param('id') id: string, @Body() dto: GrantCreditsDto) {
     return this.admin.grantCredits(id, dto);
+  }
+
+  /** Fix mistaken grants: delta (-50) or setTo (absolute balance). */
+  @Post('users/:id/credits/adjust')
+  adjustCredits(@Param('id') id: string, @Body() dto: AdjustCreditsDto) {
+    return this.admin.adjustCredits(id, dto);
+  }
+
+  @Get('pricing')
+  pricing() {
+    return this.admin.getPricing();
+  }
+
+  @Patch('pricing')
+  updatePricing(@Body() dto: UpdatePricingDto) {
+    return this.admin.updatePricing(dto);
   }
 
   @Get('subscriptions')

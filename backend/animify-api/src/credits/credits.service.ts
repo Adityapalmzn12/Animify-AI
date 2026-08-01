@@ -89,4 +89,63 @@ export class CreditsService {
   async refundCredits(userId: string, amount: number, jobId?: string, reason = 'Refund') {
     return this.grantCredits(userId, amount, reason, 'REFUND', { jobId });
   }
+
+  /**
+   * Admin correction: delta (+/-) or absolute setTo.
+   * Use when credits were granted by mistake or need a manual fix.
+   */
+  async adjustCredits(
+    userId: string,
+    opts: { delta?: number; setTo?: number; reason: string },
+  ) {
+    const reason = opts.reason?.trim() || 'Admin credit adjustment';
+    return this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
+      let next = user.creditBalance;
+      if (opts.setTo != null) {
+        if (opts.setTo < 0) {
+          throw new BadRequestException('setTo cannot be negative');
+        }
+        next = Math.floor(opts.setTo);
+      } else if (opts.delta != null) {
+        next = user.creditBalance + Math.floor(opts.delta);
+        if (next < 0) {
+          throw new BadRequestException(
+            `Adjustment would make balance negative (current ${user.creditBalance})`,
+          );
+        }
+      } else {
+        throw new BadRequestException('Provide delta or setTo');
+      }
+
+      const delta = next - user.creditBalance;
+      if (delta === 0) {
+        return { balance: user.creditBalance, delta: 0 };
+      }
+
+      const updated = await tx.user.update({
+        where: { id: userId },
+        data: { creditBalance: next },
+      });
+      await tx.creditLedger.create({
+        data: {
+          userId,
+          type: delta > 0 ? 'GRANT' : 'DEBIT',
+          amount: delta,
+          balanceAfter: updated.creditBalance,
+          reason,
+          metadata: {
+            source: 'admin_adjust',
+            previousBalance: user.creditBalance,
+            setTo: opts.setTo ?? null,
+            delta: opts.delta ?? null,
+          },
+        },
+      });
+      this.logger.log(
+        `Admin adjust user=${userId} ${user.creditBalance} → ${updated.creditBalance} (${reason})`,
+      );
+      return { balance: updated.creditBalance, delta };
+    });
+  }
 }

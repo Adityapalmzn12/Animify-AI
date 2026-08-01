@@ -17,14 +17,45 @@ class SubscriptionPage extends ConsumerStatefulWidget {
 
 class _SubscriptionPageState extends ConsumerState<SubscriptionPage> {
   bool _loading = false;
+  bool _plansLoading = true;
+  List<Map<String, dynamic>> _plans = [];
+  String? _plansError;
 
-  Future<void> _openCheckout() async {
+  @override
+  void initState() {
+    super.initState();
+    _loadPlans();
+  }
+
+  Future<void> _loadPlans() async {
+    setState(() {
+      _plansLoading = true;
+      _plansError = null;
+    });
+    try {
+      final api = ref.read(apiClientProvider);
+      final res = await api.get<Map<String, dynamic>>('/payments/plans');
+      final list = (res.data?['plans'] as List?) ?? [];
+      setState(() {
+        _plans = list
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+      });
+    } catch (e) {
+      setState(() => _plansError = e.toString());
+    } finally {
+      if (mounted) setState(() => _plansLoading = false);
+    }
+  }
+
+  Future<void> _openCheckout(String planId) async {
     setState(() => _loading = true);
     try {
       final api = ref.read(apiClientProvider);
       final res = await api.post<Map<String, dynamic>>(
         '/payments/checkout',
-        data: {},
+        data: {'planId': planId},
       );
       final url = res.data?['url'] as String?;
       if (url == null) throw Exception('No checkout URL');
@@ -33,7 +64,7 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'Complete payment in the browser. Credits appear in Wallet after success.',
+              'Complete payment in the browser. Wallet + plan update after Stripe success.',
             ),
           ),
         );
@@ -62,6 +93,8 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage> {
       final url = res.data?['url'] as String?;
       if (url == null) throw Exception('No portal URL');
       await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      ref.invalidate(creditBalanceProvider);
+      await ref.read(authStateProvider.notifier).refreshUser();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -80,25 +113,38 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Subscription')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (isPremium) _buildCurrentPlan(context, user!),
-            const SizedBox(height: 24),
-            _buildPlanComparison(context, isPremium),
-            const SizedBox(height: 16),
-            Text(
-              'Premium grants monthly credits to your wallet automatically. '
-              'When you run out, buy more credits from Wallet to keep creating.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-            ),
-            const SizedBox(height: 24),
-            _buildFeatures(context),
-          ],
+      body: RefreshIndicator(
+        onRefresh: () async {
+          await _loadPlans();
+          ref.invalidate(creditBalanceProvider);
+          await ref.read(authStateProvider.notifier).refreshUser();
+        },
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (isPremium) _buildCurrentPlan(context, user!),
+              const SizedBox(height: 24),
+              if (_plansLoading)
+                const Center(child: CircularProgressIndicator())
+              else if (_plansError != null)
+                Text('Could not load plans: $_plansError')
+              else
+                _buildPlanComparison(context, isPremium),
+              const SizedBox(height: 16),
+              Text(
+                'Buying a plan updates your Premium status and credits your wallet '
+                'automatically via Stripe. Pull to refresh after payment.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+              const SizedBox(height: 24),
+              _buildFeatures(context),
+            ],
+          ),
         ),
       ),
     );
@@ -115,26 +161,23 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Premium Plan',
+            'Premium active',
             style: TextStyle(
               color: Colors.white,
-              fontSize: 20,
+              fontSize: 22,
               fontWeight: FontWeight.bold,
             ),
           ),
           const SizedBox(height: 8),
           Text(
-            'Renews on ${_formatDate(user.subscription!.expiresAt)}',
-            style: TextStyle(color: Colors.white.withValues(alpha: 0.85)),
+            'Credits renew with each paid invoice. Manage or cancel in Stripe portal.',
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.9)),
           ),
           const SizedBox(height: 16),
-          TextButton(
+          AppButton(
             onPressed: _loading ? null : _openPortal,
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.white,
-              padding: EdgeInsets.zero,
-            ),
-            child: const Text('Manage subscription →'),
+            variant: AppButtonVariant.outlined,
+            child: const Text('Manage billing'),
           ),
         ],
       ),
@@ -142,6 +185,19 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage> {
   }
 
   Widget _buildPlanComparison(BuildContext context, bool isPremium) {
+    final plans = _plans.isEmpty
+        ? [
+            {
+              'id': 'pro',
+              'name': 'Pro',
+              'priceInr': 999,
+              'credits': 999,
+              'description': 'Best for story videos',
+              'popular': true,
+            },
+          ]
+        : _plans;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -152,42 +208,36 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage> {
               ),
         ),
         const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: _PlanCard(
-                name: 'Free',
-                price: '₹0',
-                period: '',
-                features: const [
-                  'Starter credits',
-                  'Images & short videos',
-                  'PPT maker',
-                  'Buy credits anytime',
-                ],
-                isCurrentPlan: !isPremium,
-                onSelect: null,
-              ),
+        ...plans.map((p) {
+          final id = p['id']?.toString() ?? 'pro';
+          final name = p['name']?.toString() ?? id;
+          final price = p['priceInr'] ?? 0;
+          final credits = p['credits'] ?? 0;
+          final desc = p['description']?.toString() ?? '';
+          final popular = p['popular'] == true;
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: _PlanCard(
+              name: name,
+              price: '₹$price',
+              period: '/month',
+              features: [
+                '$credits credits / month',
+                desc,
+                'Wallet updates after Stripe',
+                'Top-up anytime from Wallet',
+              ],
+              isCurrentPlan: false,
+              isPremium: popular || isPremium,
+              onSelect: _loading ? null : () => _openCheckout(id),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _PlanCard(
-                name: 'Premium',
-                price: '₹49',
-                period: '/month',
-                features: const [
-                  '500 credits / month',
-                  'Long videos + voice',
-                  'Priority generation',
-                  'HD exports',
-                ],
-                isCurrentPlan: isPremium,
-                isPremium: true,
-                onSelect: isPremium || _loading ? null : _openCheckout,
-              ),
-            ),
-          ],
-        ),
+          );
+        }),
+        if (isPremium)
+          Text(
+            'You already have Premium — subscribe again only to change pack via Stripe.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
       ],
     );
   }
@@ -197,7 +247,7 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage> {
       ['AI Video', 'Text/image → video with narration'],
       ['Creative Studio', 'Logo, fashion, Ghibli, PPT & more'],
       ['Credit Wallet', 'Track usage + buy top-ups'],
-      ['Admin control', 'Grant credits & manage plans'],
+      ['Admin control', 'Grant / adjust credits & pricing'],
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -223,9 +273,6 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage> {
       ],
     );
   }
-
-  String _formatDate(DateTime date) =>
-      '${date.day}/${date.month}/${date.year}';
 }
 
 class _PlanCard extends StatelessWidget {
@@ -335,7 +382,7 @@ class _PlanCard extends StatelessWidget {
               variant: isPremium
                   ? AppButtonVariant.gradient
                   : AppButtonVariant.outlined,
-              child: Text(isPremium ? 'Subscribe' : 'Free'),
+              child: const Text('Subscribe'),
             ),
         ],
       ),

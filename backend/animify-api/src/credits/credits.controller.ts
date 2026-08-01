@@ -1,13 +1,24 @@
-import { Controller, Get, Query, Req } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CreditsService } from './credits.service';
+import { PricingService } from './pricing.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Public } from '../common/decorators/public.decorator';
 
 @ApiTags('Credits')
 @ApiBearerAuth()
 @Controller('credits')
 export class CreditsController {
-  constructor(private readonly credits: CreditsService) {}
+  constructor(
+    private readonly credits: CreditsService,
+    private readonly pricing: PricingService,
+  ) {}
+
+  @Public()
+  @Get('pricing')
+  getPricing() {
+    return this.pricing.publicPricing();
+  }
 
   @Get('balance')
   balance(@CurrentUser('id') userId: string) {

@@ -11,6 +11,7 @@ import '../../../../core/widgets/app_text_field.dart';
 import '../../../../core/widgets/async_state_views.dart';
 import '../../../../core/widgets/themed_choice_chip.dart';
 import '../../../../core/widgets/video_duration_chips.dart';
+import '../../../wallet/presentation/providers/pricing_provider.dart';
 
 class CreativeStudioPage extends ConsumerStatefulWidget {
   final String? initialMode;
@@ -255,9 +256,12 @@ class _CreativeStudioPageState extends ConsumerState<CreativeStudioPage> {
                   children: _modes.map((m) {
                     final mode = m['mode'] as String? ?? '';
                     final selected = mode == _selectedMode;
+                    final credits = m['credits'];
+                    final title = m['title']?.toString() ?? mode;
+                    final label = credits != null ? '$title · $credits cr' : title;
                     return ThemedChoiceChip(
                       selected: selected,
-                      label: m['title']?.toString() ?? mode,
+                      label: label,
                       onSelected: (_) => setState(() => _selectedMode = mode),
                     );
                   }).toList(),
@@ -282,6 +286,10 @@ class _CreativeStudioPageState extends ConsumerState<CreativeStudioPage> {
                   VideoDurationChips(
                     value: _duration,
                     onChanged: (d) => setState(() => _duration = d),
+                    creditsByDuration: ref
+                        .watch(creditPricingProvider)
+                        .valueOrNull
+                        ?.videoCredits,
                   ),
                   const SizedBox(height: 12),
                   Text(

@@ -39,7 +39,7 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage> {
         );
       }
       ref.invalidate(creditBalanceProvider);
-      await ref.read(authProvider.notifier).refreshUser();
+      await ref.read(authStateProvider.notifier).refreshUser();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

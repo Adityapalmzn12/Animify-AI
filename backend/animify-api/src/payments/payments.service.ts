@@ -15,6 +15,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreditsService } from '../credits/credits.service';
 import { PricingService } from '../credits/pricing.service';
+import { CommissionService } from '../credits/commission.service';
 import { CheckoutDto, PromoDto, WalletTopupDto } from './dto/payments.dto';
 
 @Injectable()
@@ -27,6 +28,7 @@ export class PaymentsService {
     private readonly config: ConfigService,
     private readonly credits: CreditsService,
     private readonly pricing: PricingService,
+    private readonly commission: CommissionService,
   ) {
     const secretKey = this.config.get<string>('payment.stripe.secretKey');
     if (secretKey) {
@@ -251,6 +253,16 @@ export class PaymentsService {
       'PURCHASE',
       { source: 'stripe_invoice', invoiceId: invoice.id, planId },
     );
+
+    const grossInr = (invoice.amount_paid ?? 0) / 100;
+    await this.commission.recordPurchaseSplit({
+      buyerUserId: sub.userId,
+      grossInr: grossInr || plan?.priceInr || 0,
+      creditsGranted: premiumGrant,
+      source: 'renewal',
+      providerId: invoice.id,
+      metadata: { planId },
+    });
   }
 
   private async onSubscriptionDeleted(stripeSub: Stripe.Subscription) {
@@ -289,6 +301,15 @@ export class PaymentsService {
       await this.prisma.payment.updateMany({
         where: { providerId: session.id },
         data: { status: PaymentStatus.COMPLETED },
+      });
+      const grossInr = (session.amount_total ?? 0) / 100;
+      await this.commission.recordPurchaseSplit({
+        buyerUserId: userId,
+        grossInr: grossInr || credits,
+        creditsGranted: credits,
+        source: 'wallet_topup',
+        providerId: session.id,
+        metadata: { type: 'wallet_topup' },
       });
       return;
     }
@@ -352,7 +373,7 @@ export class PaymentsService {
     );
 
     const amount = (session.amount_total ?? 0) / 100;
-    await this.prisma.payment.create({
+    const payment = await this.prisma.payment.create({
       data: {
         userId,
         amount,
@@ -360,8 +381,18 @@ export class PaymentsService {
         status: PaymentStatus.COMPLETED,
         provider: PaymentProvider.STRIPE,
         providerId: session.id,
-        metadata: { mode: session.mode },
+        metadata: { mode: session.mode, planId },
       },
+    });
+
+    await this.commission.recordPurchaseSplit({
+      buyerUserId: userId,
+      grossInr: amount || plan?.priceInr || 0,
+      creditsGranted: premiumGrant,
+      source: 'subscription',
+      paymentId: payment.id,
+      providerId: session.id,
+      metadata: { planId, planName: plan?.name },
     });
   }
 

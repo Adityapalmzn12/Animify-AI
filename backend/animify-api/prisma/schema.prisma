@@ -137,6 +137,8 @@ model User {
   role          UserRole   @default(USER)
   status        UserStatus @default(ACTIVE)
   creditBalance Int        @default(0) @map("credit_balance")
+  /// Owner/admin INR earnings from 55% commission on user purchases
+  earningsBalanceInr Decimal @default(0) @map("earnings_balance_inr") @db.Decimal(12, 2)
   fcmToken      String?    @map("fcm_token")
   locale        String     @default("en")
   createdAt     DateTime   @default(now()) @map("created_at")
@@ -155,8 +157,35 @@ model User {
   creditLedgers  CreditLedger[]
   favorites      Favorite[]
   voices         Voice[]
+  commissionsAsBuyer CommissionEntry[] @relation("CommissionBuyer")
+  commissionsAsOwner CommissionEntry[] @relation("CommissionOwner")
 
   @@map("users")
+}
+
+/// Auto 55% owner commission + 45% API budget on every credit purchase
+model CommissionEntry {
+  id             String   @id @default(uuid())
+  buyerUserId    String   @map("buyer_user_id")
+  ownerUserId    String?  @map("owner_user_id")
+  paymentId      String?  @map("payment_id")
+  source         String   // wallet_topup | subscription | renewal
+  grossInr       Decimal  @map("gross_inr") @db.Decimal(12, 2)
+  apiBudgetInr   Decimal  @map("api_budget_inr") @db.Decimal(12, 2)
+  commissionInr  Decimal  @map("commission_inr") @db.Decimal(12, 2)
+  marginPercent  Int      @default(55) @map("margin_percent")
+  creditsGranted Int      @default(0) @map("credits_granted")
+  currency       String   @default("INR")
+  metadata       Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  buyer User  @relation("CommissionBuyer", fields: [buyerUserId], references: [id], onDelete: Cascade)
+  owner User? @relation("CommissionOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+
+  @@index([buyerUserId])
+  @@index([ownerUserId])
+  @@index([createdAt])
+  @@map("commission_entries")
 }
 
 model Project {

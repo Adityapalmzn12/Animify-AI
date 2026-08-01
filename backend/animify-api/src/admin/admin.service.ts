@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AiProviderBus } from '../ai-providers/providers/ai-provider.bus';
 import { CreditsService } from '../credits/credits.service';
 import { PricingService } from '../credits/pricing.service';
+import { CommissionService } from '../credits/commission.service';
 import {
   AdjustCreditsDto,
   CreateCouponDto,
@@ -35,6 +36,7 @@ export class AdminService {
     private readonly bus: AiProviderBus,
     private readonly credits: CreditsService,
     private readonly pricing: PricingService,
+    private readonly commission: CommissionService,
     private readonly config: ConfigService,
   ) {}
 
@@ -561,6 +563,14 @@ export class AdminService {
       recomputeFromProviderCosts: dto.recomputeFromProviderCosts,
       providerCosts: dto.providerCosts,
     });
+  }
+
+  commissionSummary() {
+    return this.commission.summary();
+  }
+
+  withdrawCommission(amountInr: number, note?: string) {
+    return this.commission.withdraw(amountInr, note);
   }
 
   async listSubscriptions(page = 1, limit = 20) {

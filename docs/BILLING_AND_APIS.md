@@ -119,3 +119,16 @@ REPLICATE_API_TOKEN=
 OPENAI_API_KEY=
 AI_PROVIDER=replicate
 ```
+
+## Owner commission (55% auto)
+
+When a user buys credits (Wallet top-up or Subscription):
+
+| Split | % | Where it goes |
+|-------|---|---------------|
+| Your commission | **55%** | Credited to admin `earningsBalanceInr` + **My commission** page |
+| API usage budget | **45%** | Tracked for Replicate/OpenAI spend |
+
+Admin: `GET /admin/commission` · withdraw: `POST /admin/commission/withdraw`  
+Owner email: `OWNER_USER_EMAIL` (default admin account).
+

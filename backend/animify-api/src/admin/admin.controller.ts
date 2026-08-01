@@ -69,6 +69,19 @@ export class AdminController {
     return this.admin.updatePricing(dto);
   }
 
+  /** Owner 55% commission wallet + purchase splits. */
+  @Get('commission')
+  commission() {
+    return this.admin.commissionSummary();
+  }
+
+  @Post('commission/withdraw')
+  withdrawCommission(
+    @Body() body: { amountInr: number; note?: string },
+  ) {
+    return this.admin.withdrawCommission(body.amountInr, body.note);
+  }
+
   @Get('subscriptions')
   subscriptions(@Query('page') page = '1', @Query('limit') limit = '20') {
     return this.admin.listSubscriptions(parseInt(page, 10), parseInt(limit, 10));

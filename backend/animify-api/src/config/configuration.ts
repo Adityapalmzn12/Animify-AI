@@ -110,6 +110,8 @@ export default () => ({
         : 'http://127.0.0.1:8000',
     fal: {
       apiKey: process.env.FAL_API_KEY,
+      // Off by default — Fal account is exhausted; set FAL_ENABLED=true after top-up
+      enabled: (process.env.FAL_ENABLED || 'false').toLowerCase() === 'true',
     },
     replicate: {
       apiToken: process.env.REPLICATE_API_TOKEN,

@@ -106,26 +106,32 @@ export class AiProviderBus {
     const preferred = (this.config.get<string>('ai.provider') || '').toLowerCase();
     let ordered: AiProvider[] = [];
 
+    // Fal balance is exhausted — keep it out of image path; optional for video only.
+    const falEnabled =
+      (this.config.get<string>('ai.fal.enabled') || 'false').toLowerCase() ===
+      'true';
+
     if (jobType === 'SCRIPT') {
       ordered = [this.openai, this.gemini];
-    } else     if (jobType === 'IMAGE_GEN') {
-      // Replicate Flux is reliable when OpenAI/Fal billing is blocked
-      ordered = [this.replicate, this.openai, this.huggingface, this.fal];
+    } else if (jobType === 'IMAGE_GEN') {
+      // Never use Fal for images while account is locked / unpaid
+      ordered = [this.replicate, this.openai, this.huggingface];
     } else if (
       jobType === 'TEXT_TO_VIDEO' ||
       jobType === 'IMAGE_TO_VIDEO' ||
       jobType === 'STORY_REEL'
     ) {
-      // Prefer Replicate — Fal account is currently exhausted
-      ordered = [this.replicate, this.fal];
+      ordered = falEnabled
+        ? [this.replicate, this.fal]
+        : [this.replicate];
     } else if (jobType === 'STYLIZE' || String(jobType).startsWith('EDIT_')) {
       ordered = [this.oss];
     } else {
-      ordered = [...this.providers];
+      ordered = [this.replicate, this.openai, this.oss];
     }
 
     const configured = ordered.filter((p) => p.isConfigured());
-    if (preferred) {
+    if (preferred && preferred !== 'fal') {
       const pref = configured.find((p) => p.name === preferred);
       if (pref) {
         return [pref, ...configured.filter((p) => p !== pref)];
@@ -182,6 +188,14 @@ export class AiProviderBus {
           `${provider.name} failed (${error instanceof Error ? error.message : error}); trying next provider`,
         );
       }
+    }
+    const msg =
+      lastError instanceof Error ? lastError.message : 'All AI providers failed';
+    // Never surface Fal billing to the user when Fal is not the intended provider
+    if (/fal balance|fal\.ai/i.test(msg)) {
+      throw new Error(
+        'Image/video generation failed. Top up Replicate at replicate.com/account/billing (Fal is disabled).',
+      );
     }
     throw lastError instanceof Error
       ? lastError

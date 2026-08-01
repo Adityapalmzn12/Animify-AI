@@ -101,7 +101,12 @@ export class StudioService {
       }
 
       // Image-first creative tools
-      const image = await this.generateAndStoreImage(userId, enhanced, mode);
+      const image = await this.generateAndStoreImage(
+        userId,
+        enhanced,
+        mode,
+        qualityTier,
+      );
       const job = await this.prisma.videoJob.create({
         data: {
           userId,
@@ -282,19 +287,25 @@ export class StudioService {
     userId: string,
     prompt: string,
     mode: CreativeMode,
+    qualityTier = 'economy',
   ) {
+    const tier = await this.pricing.getTier(qualityTier);
     const result = await this.bus.submit({
       jobId: `studio_${Date.now()}`,
       jobType: 'IMAGE_GEN',
       prompt,
-      settings: { mode },
+      settings: {
+        mode,
+        qualityTier,
+        imageModel: tier.imageModel,
+      },
     });
 
     if (result.status !== 'completed' || !result.resultUrl) {
       throw new Error(
         result.metadata?.error
           ? String(result.metadata.error)
-          : 'Image provider returned no result. Check OPENAI_API_KEY / FAL_API_KEY.',
+          : 'Image provider returned no result. Check REPLICATE_API_TOKEN.',
       );
     }
 

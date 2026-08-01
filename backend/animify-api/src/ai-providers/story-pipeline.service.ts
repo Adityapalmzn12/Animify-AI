@@ -103,7 +103,11 @@ export class StoryPipelineService {
   private videoProviders(): AiProvider[] {
     const list: AiProvider[] = [];
     if (this.replicate.isConfigured()) list.push(this.replicate);
-    if (this.fal.isConfigured()) list.push(this.fal);
+    const falOn =
+      (this.config.get<string>('ai.fal.enabled') as unknown as boolean) ===
+        true ||
+      String(this.config.get('ai.fal.enabled')).toLowerCase() === 'true';
+    if (falOn && this.fal.isConfigured()) list.push(this.fal);
     return list;
   }
 

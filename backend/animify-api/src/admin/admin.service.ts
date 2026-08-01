@@ -553,12 +553,13 @@ export class AdminService {
 
   updatePricing(dto: UpdatePricingDto) {
     // Margin is internal (default 55%) — never driven from admin UI fields.
-    const { marginPercent: _ignore, ...rest } = dto as UpdatePricingDto & {
-      marginPercent?: number;
-    };
     return this.pricing.saveConfig({
-      ...rest,
+      retailCreditInr: dto.retailCreditInr,
+      costs: dto.costs,
+      plans: dto.plans,
+      tiers: dto.tiers as any,
       recomputeFromProviderCosts: dto.recomputeFromProviderCosts,
+      providerCosts: dto.providerCosts,
     });
   }
 

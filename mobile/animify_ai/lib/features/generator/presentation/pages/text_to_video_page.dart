@@ -7,6 +7,7 @@ import '../../../../core/router/app_router.dart';
 import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/app_text_field.dart';
 import '../../../../core/widgets/themed_choice_chip.dart';
+import '../../../../core/widgets/quality_tier_chips.dart';
 import '../../../../core/widgets/video_duration_chips.dart';
 import '../../../wallet/presentation/providers/pricing_provider.dart';
 
@@ -23,6 +24,7 @@ class _TextToVideoPageState extends ConsumerState<TextToVideoPage> {
   String _aspect = '9:16';
   String _style = 'anime';
   int _duration = 30;
+  String _qualityTier = 'economy';
   bool _isSubmitting = false;
 
   static const _aspects = ['9:16', '16:9', '1:1'];
@@ -48,6 +50,7 @@ class _TextToVideoPageState extends ConsumerState<TextToVideoPage> {
           'aspect': _aspect,
           'style': _style,
           'duration': _duration,
+          'qualityTier': _qualityTier,
           'addAudio': true,
         },
       );
@@ -76,6 +79,7 @@ class _TextToVideoPageState extends ConsumerState<TextToVideoPage> {
 
   @override
   Widget build(BuildContext context) {
+    final pricing = ref.watch(creditPricingProvider).valueOrNull;
     return Scaffold(
       appBar: AppBar(title: const Text('Text to Video')),
       body: SingleChildScrollView(
@@ -114,8 +118,22 @@ class _TextToVideoPageState extends ConsumerState<TextToVideoPage> {
               VideoDurationChips(
                 value: _duration,
                 onChanged: (d) => setState(() => _duration = d),
-                creditsByDuration:
-                    ref.watch(creditPricingProvider).valueOrNull?.videoCredits,
+                creditsByDuration: () {
+                  final match = pricing?.tiers
+                      .where((t) => t.id == _qualityTier)
+                      .toList();
+                  if (match == null || match.isEmpty) {
+                    return pricing?.videoCredits;
+                  }
+                  return match.first.videoCredits;
+                }(),
+              ),
+              const SizedBox(height: 16),
+              QualityTierChips(
+                value: _qualityTier,
+                onChanged: (t) => setState(() => _qualityTier = t),
+                tiers: pricing?.tiers ?? const [],
+                durationSec: _duration,
               ),
               const SizedBox(height: 24),
               Text('Style', style: Theme.of(context).textTheme.titleSmall),

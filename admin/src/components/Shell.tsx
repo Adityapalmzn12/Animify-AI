@@ -7,7 +7,7 @@ import { setStoredUser, setToken } from "@/lib/api";
 const nav = [
   { href: "/dashboard", label: "Ops board" },
   { href: "/providers", label: "Buy APIs" },
-  { href: "/pricing", label: "Pricing" },
+  { href: "/pricing", label: "Quality & credits" },
   { href: "/users", label: "Users" },
   { href: "/subscriptions", label: "Subscriptions" },
 ];

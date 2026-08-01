@@ -47,14 +47,22 @@ export class CreateGeneratorJobDto {
   style?: string;
 
   @ApiPropertyOptional({
-    description: 'Target video length in seconds (15 | 30 | 59)',
+    description: 'Target video length in seconds (10 | 30 | 60)',
     example: 30,
   })
   @IsOptional()
   @IsInt()
-  @Min(15)
-  @Max(59)
+  @Min(10)
+  @Max(60)
   duration?: number;
+
+  @ApiPropertyOptional({
+    description: 'economy (default/cheap) | standard | premium',
+    example: 'economy',
+  })
+  @IsOptional()
+  @IsString()
+  qualityTier?: string;
 
   @ApiPropertyOptional({
     description: 'Generate narration voice (default true for video jobs)',

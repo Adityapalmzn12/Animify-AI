@@ -171,54 +171,31 @@ class _WalletPageState extends ConsumerState<WalletPage> {
               ),
               data: (pricing) => Column(
                 children: [
-                  Row(
-                    children: [
-                      for (final d in [10, 30, 60])
-                        Expanded(
-                          child: Card(
-                            child: Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Column(
-                                children: [
-                                  Text(
-                                    '${d}s video',
-                                    style: Theme.of(context).textTheme.labelMedium,
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    '${pricing.videoCredits[d] ?? '—'}',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleLarge
-                                        ?.copyWith(
-                                          fontWeight: FontWeight.bold,
-                                          color: AppColors.primary,
-                                        ),
-                                  ),
-                                  Text(
-                                    'credits',
-                                    style: Theme.of(context).textTheme.bodySmall,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
+                  Text(
+                    'Default = Economy (cheapest). Premium costs more credits.',
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 8),
-                  ...pricing.modules.take(8).map(
-                        (m) => ListTile(
-                          dense: true,
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(m['module']?.toString() ?? m['key']?.toString() ?? ''),
-                          subtitle: Text(m['description']?.toString() ?? ''),
-                          trailing: Text(
-                            '${m['credits']} cr',
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
+                  ...pricing.tiers.map(
+                    (t) => Card(
+                      child: ListTile(
+                        title: Text(
+                          '${t.name}${t.isDefault ? ' · default' : ''}',
+                        ),
+                        subtitle: Text(
+                          '${t.tagline}\n'
+                          '10s ${t.videoCredits[10]} · '
+                          '30s ${t.videoCredits[30]} · '
+                          '60s ${t.videoCredits[60]} cr',
+                        ),
+                        isThreeLine: true,
+                        trailing: Text(
+                          '${t.imageCredits} img',
+                          style: const TextStyle(fontWeight: FontWeight.w600),
                         ),
                       ),
+                    ),
+                  ),
                 ],
               ),
             ),

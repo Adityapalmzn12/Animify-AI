@@ -3,44 +3,43 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 
-type ModuleRow = {
-  key: string;
-  module: string;
-  description: string;
-  credits: number;
-  durationSec?: number;
-};
-
-type Plan = {
+type Tier = {
   id: string;
   name: string;
-  priceInr: number;
-  credits: number;
-  description: string;
-  popular?: boolean;
+  tagline: string;
+  default?: boolean;
+  videoModelT2v: string;
+  videoModelI2v: string;
+  imageModel: string;
+  storyCredits: { 10: number; 30: number; 60: number };
+  imageCredits: number;
 };
 
 type Pricing = {
-  retailCreditInr: number;
-  modules: ModuleRow[];
-  video: { "10s": number; "30s": number; "60s": number };
-  plans: Plan[];
+  defaultTier: string;
+  tiers: Tier[];
+  plans: Array<{
+    id: string;
+    name: string;
+    priceInr: number;
+    credits: number;
+    description: string;
+    popular?: boolean;
+  }>;
   note?: string;
 };
 
 export default function PricingPage() {
   const [data, setData] = useState<Pricing | null>(null);
+  const [tiers, setTiers] = useState<Tier[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [costEdits, setCostEdits] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     try {
       const p = await api<Pricing>("/admin/pricing");
       setData(p);
-      const edits: Record<string, string> = {};
-      for (const row of p.modules || []) edits[row.key] = String(row.credits);
-      setCostEdits(edits);
+      setTiers(p.tiers || []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load pricing");
     }
@@ -50,19 +49,27 @@ export default function PricingPage() {
     load();
   }, [load]);
 
+  function updateTier(
+    id: string,
+    patch: Partial<Tier> | ((t: Tier) => Partial<Tier>),
+  ) {
+    setTiers((prev) =>
+      prev.map((t) => {
+        if (t.id !== id) return t;
+        const p = typeof patch === "function" ? patch(t) : patch;
+        return { ...t, ...p };
+      }),
+    );
+  }
+
   async function save(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError("");
     try {
-      const costs: Record<string, number> = {};
-      for (const [k, v] of Object.entries(costEdits)) {
-        const n = Number(v);
-        if (!Number.isNaN(n) && n > 0) costs[k] = Math.floor(n);
-      }
       await api("/admin/pricing", {
         method: "PATCH",
-        body: JSON.stringify({ costs }),
+        body: JSON.stringify({ tiers }),
       });
       await load();
     } catch (err) {
@@ -91,72 +98,109 @@ export default function PricingPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="font-display text-3xl md:text-4xl">Credit usage</h1>
+        <h1 className="font-display text-3xl md:text-4xl">Quality & credits</h1>
         <p className="text-muted text-sm mt-1">
-          Transparent credits charged to customers per module. Same numbers appear
-          in the app Wallet and on generate screens.
+          Default is <strong className="text-white">Economy (cheap)</strong>.
+          Users can pick Standard / Premium and pay more credits. Edit rates and
+          model slugs here.
         </p>
+        {data?.note ? (
+          <p className="text-xs text-muted mt-2">{data.note}</p>
+        ) : null}
       </header>
 
       {error ? <div className="panel p-4 text-[var(--bad)]">{error}</div> : null}
 
-      {data?.video ? (
-        <div className="grid sm:grid-cols-3 gap-3">
-          {(
-            [
-              ["10s video", data.video["10s"]],
-              ["30s video", data.video["30s"]],
-              ["60s video", data.video["60s"]],
-            ] as const
-          ).map(([label, credits]) => (
-            <div key={label} className="panel p-4">
-              <p className="text-xs uppercase tracking-wide text-muted">{label}</p>
-              <p className="text-3xl font-semibold mt-1">{credits}</p>
-              <p className="text-xs text-muted">credits / create</p>
-            </div>
-          ))}
-        </div>
-      ) : null}
-
       <form onSubmit={save} className="space-y-4">
-        <div className="panel overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="text-left text-muted border-b border-line">
-              <tr>
-                <th className="p-3">Module</th>
-                <th className="p-3">What it is</th>
-                <th className="p-3">Credits used</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(data?.modules || []).map((row) => (
-                <tr key={row.key} className="border-b border-line/50">
-                  <td className="p-3 font-medium">{row.module}</td>
-                  <td className="p-3 text-muted text-xs max-w-xs">
-                    {row.description}
-                  </td>
-                  <td className="p-3">
-                    <input
-                      className="input max-w-[120px]"
-                      type="number"
-                      min={1}
-                      value={costEdits[row.key] ?? ""}
-                      onChange={(e) =>
-                        setCostEdits((prev) => ({
-                          ...prev,
-                          [row.key]: e.target.value,
-                        }))
-                      }
-                    />
-                  </td>
-                </tr>
+        {tiers.map((t) => (
+          <div key={t.id} className="panel p-5 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="font-display text-2xl">
+                  {t.name}
+                  {t.default ? (
+                    <span className="ml-2 text-xs text-accent uppercase tracking-wide">
+                      default
+                    </span>
+                  ) : null}
+                </h2>
+                <p className="text-sm text-muted">{t.tagline}</p>
+              </div>
+              <p className="text-xs text-muted font-mono">{t.id}</p>
+            </div>
+
+            <div className="grid sm:grid-cols-4 gap-3">
+              {([10, 30, 60] as const).map((d) => (
+                <label key={d} className="block space-y-1">
+                  <span className="text-xs text-muted">{d}s video credits</span>
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    value={t.storyCredits[d]}
+                    onChange={(e) =>
+                      updateTier(t.id, {
+                        storyCredits: {
+                          ...t.storyCredits,
+                          [d]: Number(e.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
               ))}
-            </tbody>
-          </table>
-        </div>
+              <label className="block space-y-1">
+                <span className="text-xs text-muted">Image credits</span>
+                <input
+                  className="input"
+                  type="number"
+                  min={1}
+                  value={t.imageCredits}
+                  onChange={(e) =>
+                    updateTier(t.id, { imageCredits: Number(e.target.value) })
+                  }
+                />
+              </label>
+            </div>
+
+            <div className="grid md:grid-cols-3 gap-3">
+              <label className="block space-y-1">
+                <span className="text-xs text-muted">T2V model</span>
+                <input
+                  className="input font-mono text-xs"
+                  value={t.videoModelT2v}
+                  onChange={(e) =>
+                    updateTier(t.id, { videoModelT2v: e.target.value })
+                  }
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-xs text-muted">I2V model</span>
+                <input
+                  className="input font-mono text-xs"
+                  value={t.videoModelI2v}
+                  onChange={(e) =>
+                    updateTier(t.id, { videoModelI2v: e.target.value })
+                  }
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-xs text-muted">Image model</span>
+                <input
+                  className="input font-mono text-xs"
+                  value={t.imageModel}
+                  onChange={(e) =>
+                    updateTier(t.id, { imageModel: e.target.value })
+                  }
+                />
+              </label>
+            </div>
+          </div>
+        ))}
+
         <div className="flex flex-wrap gap-2">
           <button className="btn btn-primary" disabled={busy}>
-            {busy ? "Saving…" : "Save credit rates"}
+            {busy ? "Saving…" : "Save tiers"}
           </button>
           <button
             type="button"
@@ -164,29 +208,22 @@ export default function PricingPage() {
             disabled={busy}
             onClick={resetDefaults}
           >
-            Reset default rates
+            Reset defaults
           </button>
         </div>
       </form>
 
       <section className="space-y-3">
         <h2 className="font-display text-2xl">Subscription packs</h2>
-        <p className="text-sm text-muted">
-          Credits granted to the customer wallet after a successful Stripe purchase.
-        </p>
         <div className="grid md:grid-cols-3 gap-4">
           {(data?.plans || []).map((p) => (
             <div key={p.id} className="panel p-5 space-y-2">
-              <p className="text-xs uppercase tracking-wide text-muted">
-                {p.id}
-                {p.popular ? " · popular" : ""}
-              </p>
               <h3 className="font-display text-xl">{p.name}</h3>
               <p className="text-2xl font-semibold">
                 ₹{p.priceInr}
                 <span className="text-sm text-muted font-normal">/mo</span>
               </p>
-              <p className="text-accent">{p.credits} credits granted</p>
+              <p className="text-accent">{p.credits} credits</p>
               <p className="text-xs text-muted">{p.description}</p>
             </div>
           ))}

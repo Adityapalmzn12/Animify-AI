@@ -101,6 +101,23 @@ export class UpdatePricingDto {
     popular?: boolean;
     stripePriceId?: string | null;
   }>;
+
+  @ApiPropertyOptional({
+    description: 'Quality tiers (economy/standard/premium) with credits + models',
+  })
+  @IsOptional()
+  tiers?: Array<{
+    id: string;
+    name: string;
+    tagline: string;
+    default?: boolean;
+    videoModelT2v: string;
+    videoModelI2v: string;
+    imageModel: string;
+    engine: string;
+    storyCredits: { 10: number; 30: number; 60: number };
+    imageCredits: number;
+  }>;
 }
 
 export class UpsertFeatureFlagDto {

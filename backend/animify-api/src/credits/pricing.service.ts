@@ -2,6 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  DEFAULT_QUALITY_TIERS,
+  QualityTierDef,
+  QualityTierId,
+  normalizeQualityTier,
+} from './quality-tiers';
 
 export type PlanPack = {
   id: string;
@@ -13,81 +19,18 @@ export type PlanPack = {
   stripePriceId?: string | null;
 };
 
-/** Customer + admin facing module row (no margin / COGS). */
 export type ModuleCredit = {
   key: string;
   module: string;
   description: string;
   credits: number;
   durationSec?: number;
+  tier?: QualityTierId;
   audience: 'customer' | 'admin' | 'both';
 };
 
 const PRICING_KEY = 'billing.pricing';
-/** Internal only — never exposed on customer APIs or admin UI copy. */
 const DEFAULT_MARGIN = 55;
-
-const MODULE_META: Record<
-  string,
-  { module: string; description: string; durationSec?: number }
-> = {
-  IMAGE_GEN: {
-    module: 'Image generation',
-    description: 'Logo, fashion, Ghibli, anime, product, poster, etc.',
-  },
-  BRAND_KIT: {
-    module: 'Brand kit',
-    description: 'Two branded images in one run',
-  },
-  PPT: {
-    module: 'PPT maker',
-    description: 'AI outline → downloadable .pptx',
-  },
-  SCRIPT: {
-    module: 'Script',
-    description: 'Script / scene writing',
-  },
-  VOICE: {
-    module: 'Voice narration',
-    description: 'TTS voice-over (usually bundled in video)',
-  },
-  STYLIZE: {
-    module: 'Stylize',
-    description: 'Style transfer / enhance',
-  },
-  IMAGE_TO_VIDEO: {
-    module: 'Image → short clip',
-    description: 'Single ~10s clip from an image',
-    durationSec: 10,
-  },
-  TEXT_TO_VIDEO: {
-    module: 'Text → short clip',
-    description: 'Single short clip from text',
-  },
-  STORY_10: {
-    module: 'Video 10 seconds',
-    description: 'Scripted scenes + automatic voice',
-    durationSec: 10,
-  },
-  STORY_30: {
-    module: 'Video 30 seconds',
-    description: 'Scripted scenes + automatic voice',
-    durationSec: 30,
-  },
-  STORY_60: {
-    module: 'Video 60 seconds',
-    description: 'Scripted scenes + automatic voice',
-    durationSec: 60,
-  },
-  BG_REMOVE: {
-    module: 'Background remove',
-    description: 'Cut out subject from image',
-  },
-  EDIT: {
-    module: 'Edit tools',
-    description: 'Trim / merge / crop / filter / export',
-  },
-};
 
 @Injectable()
 export class PricingService {
@@ -97,7 +40,7 @@ export class PricingService {
     retailCreditInr: number;
     costs: Record<string, number>;
     plans: PlanPack[];
-    providerCosts: Record<string, number>;
+    tiers: QualityTierDef[];
   } | null = null;
 
   constructor(
@@ -105,15 +48,13 @@ export class PricingService {
     private readonly config: ConfigService,
   ) {}
 
-  /** Internal: userCredits = ceil(providerCost / (retail * (1 - margin))) */
   static creditsForCost(
     providerCostInr: number,
     retailCreditInr = 1,
     marginPercent = DEFAULT_MARGIN,
   ) {
     const keep = Math.max(0.05, 1 - marginPercent / 100);
-    const denom = retailCreditInr * keep;
-    return Math.max(1, Math.ceil(providerCostInr / denom));
+    return Math.max(1, Math.ceil(providerCostInr / (retailCreditInr * keep)));
   }
 
   private defaults() {
@@ -121,50 +62,27 @@ export class PricingService {
       parseInt(process.env.BILLING_MARGIN_PERCENT ?? String(DEFAULT_MARGIN), 10) ||
       DEFAULT_MARGIN;
     const retailCreditInr = parseFloat(process.env.CREDIT_INR ?? '1') || 1;
+    const tiers = DEFAULT_QUALITY_TIERS.map((t) => ({ ...t }));
+    const economy = tiers.find((t) => t.id === 'economy')!;
 
-    // Provider INR estimates (internal). User credits computed at 55% cut.
-    const providerCosts: Record<string, number> = {
-      IMAGE_GEN: 1.6,
-      BRAND_KIT: 3.2,
-      SCRIPT: 0.8,
-      VOICE: 1.2,
-      PPT: 2.0,
-      STYLIZE: 2.0,
-      IMAGE_TO_VIDEO: 6.0,
-      TEXT_TO_VIDEO: 8.0,
-      STORY_10: 11.0,
-      STORY_30: 22.0,
-      STORY_60: 42.0,
-      BG_REMOVE: 1.2,
-      EDIT: 0.8,
+    // Flat costs = economy defaults (backward compatible keys)
+    const costs: Record<string, number> = {
+      IMAGE_GEN: economy.imageCredits,
+      BRAND_KIT: economy.imageCredits * 2,
+      SCRIPT: 2,
+      VOICE: 3,
+      PPT: 5,
+      STYLIZE: 5,
+      IMAGE_TO_VIDEO: economy.storyCredits[10],
+      TEXT_TO_VIDEO: economy.storyCredits[10],
+      STORY_10: economy.storyCredits[10],
+      STORY_30: economy.storyCredits[30],
+      STORY_60: economy.storyCredits[60],
+      STORY_15: economy.storyCredits[10],
+      STORY_59: economy.storyCredits[60],
+      BG_REMOVE: 3,
+      EDIT: 2,
     };
-
-    const costs: Record<string, number> = {};
-    for (const [key, inr] of Object.entries(providerCosts)) {
-      costs[key] = PricingService.creditsForCost(
-        inr,
-        retailCreditInr,
-        marginPercent,
-      );
-    }
-
-    // Legacy env absolute overrides (user credits)
-    const envMap: Record<string, string> = {
-      IMAGE_GEN: 'credits.imageGenCost',
-      SCRIPT: 'credits.scriptCost',
-      VOICE: 'credits.voiceCost',
-      STYLIZE: 'credits.stylizeCost',
-      IMAGE_TO_VIDEO: 'credits.imageToVideoCost',
-      TEXT_TO_VIDEO: 'credits.textToVideoCost',
-    };
-    for (const [key, cfg] of Object.entries(envMap)) {
-      const v = this.config.get<number>(cfg);
-      if (v && v > 0) costs[key] = v;
-    }
-
-    // Migrate old keys if present in saved config later
-    costs.STORY_15 = costs.STORY_10;
-    costs.STORY_59 = costs.STORY_60;
 
     const plans: PlanPack[] = [
       {
@@ -172,7 +90,7 @@ export class PricingService {
         name: 'Creator',
         priceInr: 499,
         credits: 499,
-        description: 'Images, PPT & short videos',
+        description: 'Economy videos + images',
         popular: false,
       },
       {
@@ -180,7 +98,7 @@ export class PricingService {
         name: 'Pro',
         priceInr: 999,
         credits: 999,
-        description: 'Best for 10–30s story videos with voice',
+        description: 'Standard quality videos',
         popular: true,
       },
       {
@@ -188,12 +106,12 @@ export class PricingService {
         name: 'Studio',
         priceInr: 2499,
         credits: 2499,
-        description: 'Heavy creators — 60s reels & frequent exports',
+        description: 'Premium cinema videos',
         popular: false,
       },
     ];
 
-    return { marginPercent, retailCreditInr, costs, plans, providerCosts };
+    return { marginPercent, retailCreditInr, costs, plans, tiers };
   }
 
   async getConfig() {
@@ -203,24 +121,24 @@ export class PricingService {
     });
     const base = this.defaults();
     if (!row?.value || typeof row.value !== 'object') {
-      this.cache = {
-        marginPercent: base.marginPercent,
-        retailCreditInr: base.retailCreditInr,
-        costs: base.costs,
-        plans: base.plans,
-        providerCosts: base.providerCosts,
-      };
+      this.cache = { ...base };
       return this.cache;
     }
     const v = row.value as Record<string, unknown>;
-    const savedCosts = (v.costs as Record<string, number>) || {};
-    const costs = { ...base.costs, ...savedCosts };
-    // Alias legacy → new
-    if (savedCosts.STORY_15 != null && savedCosts.STORY_10 == null) {
-      costs.STORY_10 = savedCosts.STORY_15;
-    }
-    if (savedCosts.STORY_59 != null && savedCosts.STORY_60 == null) {
-      costs.STORY_60 = savedCosts.STORY_59;
+    const savedTiers = Array.isArray(v.tiers)
+      ? (v.tiers as QualityTierDef[])
+      : null;
+    const tiers = this.mergeTiers(base.tiers, savedTiers);
+    const costs = {
+      ...base.costs,
+      ...((v.costs as Record<string, number>) || {}),
+    };
+    // Keep flat STORY_* in sync with economy if not explicitly overridden
+    const eco = tiers.find((t) => t.id === 'economy')!;
+    if (!(v.costs as Record<string, number>)?.STORY_10) {
+      costs.STORY_10 = eco.storyCredits[10];
+      costs.STORY_30 = eco.storyCredits[30];
+      costs.STORY_60 = eco.storyCredits[60];
     }
     costs.STORY_15 = costs.STORY_10;
     costs.STORY_59 = costs.STORY_60;
@@ -230,49 +148,69 @@ export class PricingService {
       retailCreditInr: Number(v.retailCreditInr) || base.retailCreditInr,
       costs,
       plans: Array.isArray(v.plans) ? (v.plans as PlanPack[]) : base.plans,
-      providerCosts: {
-        ...base.providerCosts,
-        ...((v.providerCosts as Record<string, number>) || {}),
-      },
+      tiers,
     };
     return this.cache;
   }
 
+  private mergeTiers(
+    defaults: QualityTierDef[],
+    saved: QualityTierDef[] | null,
+  ): QualityTierDef[] {
+    if (!saved?.length) return defaults.map((t) => ({ ...t }));
+    return defaults.map((d) => {
+      const s = saved.find((x) => x.id === d.id);
+      if (!s) return { ...d };
+      return {
+        ...d,
+        ...s,
+        id: d.id,
+        storyCredits: {
+          10: Number(s.storyCredits?.[10] ?? d.storyCredits[10]),
+          30: Number(s.storyCredits?.[30] ?? d.storyCredits[30]),
+          60: Number(s.storyCredits?.[60] ?? d.storyCredits[60]),
+        },
+        imageCredits: Number(s.imageCredits ?? d.imageCredits),
+      };
+    });
+  }
+
   async saveConfig(input: {
-    marginPercent?: number;
     retailCreditInr?: number;
     costs?: Record<string, number>;
-    providerCosts?: Record<string, number>;
     plans?: PlanPack[];
+    tiers?: QualityTierDef[];
     recomputeFromProviderCosts?: boolean;
+    marginPercent?: number;
+    providerCosts?: Record<string, number>;
   }) {
     const current = await this.getConfig();
-    const defaults = this.defaults();
-    // Internal cut is fixed at 55% (not shown in any UI / public API).
     const marginPercent =
       parseInt(process.env.BILLING_MARGIN_PERCENT ?? String(DEFAULT_MARGIN), 10) ||
       DEFAULT_MARGIN;
-
-    let retailCreditInr = input.retailCreditInr ?? current.retailCreditInr;
-    let costs = { ...current.costs, ...(input.costs || {}) };
-    let providerCosts = {
-      ...current.providerCosts,
-      ...(input.providerCosts || {}),
-    };
-
-    if (input.recomputeFromProviderCosts) {
-      costs = { ...costs };
-      for (const [key, inr] of Object.entries(providerCosts)) {
-        costs[key] = PricingService.creditsForCost(
-          Number(inr),
-          retailCreditInr,
-          marginPercent,
-        );
-      }
+    const retailCreditInr = input.retailCreditInr ?? current.retailCreditInr;
+    let tiers = this.mergeTiers(current.tiers, input.tiers || null);
+    if (input.tiers?.length) {
+      tiers = this.mergeTiers(DEFAULT_QUALITY_TIERS, input.tiers);
     }
 
-    costs.STORY_15 = costs.STORY_10 ?? costs.STORY_15;
-    costs.STORY_59 = costs.STORY_60 ?? costs.STORY_59;
+    let costs = { ...current.costs, ...(input.costs || {}) };
+    const eco = tiers.find((t) => t.id === 'economy')!;
+    // Flat keys follow economy (default path) unless admin overrode via costs
+    if (!input.costs?.STORY_10) costs.STORY_10 = eco.storyCredits[10];
+    if (!input.costs?.STORY_30) costs.STORY_30 = eco.storyCredits[30];
+    if (!input.costs?.STORY_60) costs.STORY_60 = eco.storyCredits[60];
+    if (!input.costs?.IMAGE_GEN) costs.IMAGE_GEN = eco.imageCredits;
+    costs.STORY_15 = costs.STORY_10;
+    costs.STORY_59 = costs.STORY_60;
+
+    if (input.recomputeFromProviderCosts) {
+      tiers = DEFAULT_QUALITY_TIERS.map((t) => ({ ...t }));
+      costs.STORY_10 = tiers[0].storyCredits[10];
+      costs.STORY_30 = tiers[0].storyCredits[30];
+      costs.STORY_60 = tiers[0].storyCredits[60];
+      costs.IMAGE_GEN = tiers[0].imageCredits;
+    }
 
     const plans = input.plans ?? current.plans;
     const value = {
@@ -280,7 +218,7 @@ export class PricingService {
       retailCreditInr,
       costs,
       plans,
-      providerCosts,
+      tiers,
       updatedAt: new Date().toISOString(),
     };
 
@@ -289,21 +227,19 @@ export class PricingService {
       create: {
         key: PRICING_KEY,
         value: value as Prisma.InputJsonValue,
-        description: 'Credit prices per module + subscription packs',
+        description: 'Credit prices, quality tiers, subscription packs',
         isPublic: true,
       },
-      update: {
-        value: value as Prisma.InputJsonValue,
-      },
+      update: { value: value as Prisma.InputJsonValue },
     });
     this.cache = {
       marginPercent,
       retailCreditInr,
       costs,
       plans,
-      providerCosts,
+      tiers,
     };
-    this.logger.log(`Pricing saved retail=₹${retailCreditInr}/credit`);
+    this.logger.log('Pricing + quality tiers saved');
     return this.publicPricing();
   }
 
@@ -314,69 +250,108 @@ export class PricingService {
     return 5;
   }
 
-  async storyKeyForDuration(durationSec: number) {
-    if (durationSec <= 10) return 'STORY_10';
-    if (durationSec <= 30) return 'STORY_30';
-    return 'STORY_60';
+  async getTier(tierId?: string | null): Promise<QualityTierDef> {
+    const cfg = await this.getConfig();
+    const id = normalizeQualityTier(tierId);
+    return cfg.tiers.find((t) => t.id === id) || cfg.tiers[0];
   }
 
-  async storyCredits(durationSec: number) {
-    const key = await this.storyKeyForDuration(durationSec);
-    const fallback = durationSec <= 10 ? 25 : durationSec <= 30 ? 50 : 95;
-    return this.costFor(key, fallback);
+  async storyCredits(durationSec: number, tierId?: string | null) {
+    const tier = await this.getTier(tierId);
+    const d =
+      durationSec <= 10 ? 10 : durationSec <= 30 ? 30 : (60 as 10 | 30 | 60);
+    return tier.storyCredits[d];
   }
 
-  private moduleRows(cfg: Awaited<ReturnType<PricingService['getConfig']>>): ModuleCredit[] {
-    const order = [
-      'STORY_10',
-      'STORY_30',
-      'STORY_60',
-      'IMAGE_GEN',
-      'BRAND_KIT',
-      'PPT',
-      'IMAGE_TO_VIDEO',
-      'TEXT_TO_VIDEO',
-      'SCRIPT',
-      'VOICE',
-      'STYLIZE',
-      'BG_REMOVE',
-      'EDIT',
-    ];
-    return order
-      .filter((key) => cfg.costs[key] != null || MODULE_META[key])
-      .map((key) => {
-        const meta = MODULE_META[key] || {
-          module: key.replace(/_/g, ' '),
-          description: '',
-        };
-        return {
-          key,
-          module: meta.module,
-          description: meta.description,
-          credits: cfg.costs[key] ?? 1,
-          durationSec: meta.durationSec,
-          audience: 'both' as const,
-        };
-      });
+  async imageCredits(tierId?: string | null) {
+    const tier = await this.getTier(tierId);
+    return tier.imageCredits;
   }
 
-  /**
-   * Customer-safe catalog — credit costs only.
-   * Never includes margin, COGS, or provider INR.
-   */
   async publicPricing() {
     const cfg = await this.getConfig();
-    const modules = this.moduleRows(cfg);
-    const byKey = Object.fromEntries(modules.map((m) => [m.key, m.credits]));
+    const defaultTier =
+      cfg.tiers.find((t) => t.default) || cfg.tiers[0] || DEFAULT_QUALITY_TIERS[0];
+
+    const modules: ModuleCredit[] = [];
+    for (const tier of cfg.tiers) {
+      for (const dur of [10, 30, 60] as const) {
+        modules.push({
+          key: `STORY_${dur}_${tier.id}`,
+          module: `Video ${dur}s · ${tier.name}`,
+          description: tier.tagline,
+          credits: tier.storyCredits[dur],
+          durationSec: dur,
+          tier: tier.id,
+          audience: 'both',
+        });
+      }
+      modules.push({
+        key: `IMAGE_GEN_${tier.id}`,
+        module: `Image · ${tier.name}`,
+        description: tier.tagline,
+        credits: tier.imageCredits,
+        tier: tier.id,
+        audience: 'both',
+      });
+    }
+    modules.push(
+      {
+        key: 'PPT',
+        module: 'PPT maker',
+        description: 'AI outline → .pptx',
+        credits: cfg.costs.PPT ?? 5,
+        audience: 'both',
+      },
+      {
+        key: 'SCRIPT',
+        module: 'Script',
+        description: 'Script writing',
+        credits: cfg.costs.SCRIPT ?? 2,
+        audience: 'both',
+      },
+    );
+
+    const videoByTier = Object.fromEntries(
+      cfg.tiers.map((t) => [
+        t.id,
+        {
+          '10s': t.storyCredits[10],
+          '30s': t.storyCredits[30],
+          '60s': t.storyCredits[60],
+          image: t.imageCredits,
+        },
+      ]),
+    );
+
     return {
       retailCreditInr: cfg.retailCreditInr,
-      modules,
+      defaultTier: defaultTier.id,
+      tiers: cfg.tiers.map((t) => ({
+        id: t.id,
+        name: t.name,
+        tagline: t.tagline,
+        default: !!t.default,
+        engine: t.engine,
+        videoModelT2v: t.videoModelT2v,
+        videoModelI2v: t.videoModelI2v,
+        imageModel: t.imageModel,
+        storyCredits: t.storyCredits,
+        imageCredits: t.imageCredits,
+        video: {
+          '10s': t.storyCredits[10],
+          '30s': t.storyCredits[30],
+          '60s': t.storyCredits[60],
+        },
+      })),
       video: {
-        '10s': byKey.STORY_10,
-        '30s': byKey.STORY_30,
-        '60s': byKey.STORY_60,
+        '10s': defaultTier.storyCredits[10],
+        '30s': defaultTier.storyCredits[30],
+        '60s': defaultTier.storyCredits[60],
       },
-      byModule: byKey,
+      videoByTier,
+      modules,
+      byModule: Object.fromEntries(modules.map((m) => [m.key, m.credits])),
       plans: cfg.plans.map((p) => ({
         id: p.id,
         name: p.name,
@@ -387,13 +362,12 @@ export class PricingService {
         stripePriceId: p.stripePriceId,
       })),
       examples: {
-        image: byKey.IMAGE_GEN,
-        video10s: byKey.STORY_10,
-        video30s: byKey.STORY_30,
-        video60s: byKey.STORY_60,
-        ppt: byKey.PPT,
+        image: defaultTier.imageCredits,
+        video10s: defaultTier.storyCredits[10],
+        video30s: defaultTier.storyCredits[30],
+        video60s: defaultTier.storyCredits[60],
+        ppt: cfg.costs.PPT ?? 5,
       },
-      // legacy shape for older clients (credits only)
       costs: modules.map((m) => ({
         key: m.key,
         label: m.module,
@@ -402,18 +376,11 @@ export class PricingService {
     };
   }
 
-  /** Admin catalog — same transparent credits; no margin fields. */
   async adminPricing() {
     const pub = await this.publicPricing();
-    const cfg = await this.getConfig();
     return {
       ...pub,
-      note: 'Edit credits charged to customers per module. Changes apply immediately in the app.',
-      // Keep for PATCH recompute only — not for UI display
-      _internal: {
-        canRecomputeDefaults: true,
-      },
-      retailCreditInr: cfg.retailCreditInr,
+      note: 'Economy is default (cheap). Users can pick Standard/Premium and pay more credits. Edit credits & model slugs per tier.',
     };
   }
 

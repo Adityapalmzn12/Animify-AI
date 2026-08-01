@@ -121,6 +121,14 @@ export class CreateStudioDto {
   @IsBoolean()
   addAudio?: boolean;
 
+  @ApiPropertyOptional({
+    description: 'economy (default/cheap) | standard | premium',
+    example: 'economy',
+  })
+  @IsOptional()
+  @IsString()
+  qualityTier?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsUUID()

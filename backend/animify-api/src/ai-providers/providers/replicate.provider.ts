@@ -6,6 +6,10 @@ import {
   AiSubmitInput,
   AiSubmitResult,
 } from './ai-provider.interface';
+import {
+  DEFAULT_QUALITY_TIERS,
+  normalizeQualityTier,
+} from '../../credits/quality-tiers';
 
 @Injectable()
 export class ReplicateProvider implements AiProvider {
@@ -31,35 +35,77 @@ export class ReplicateProvider implements AiProvider {
     };
   }
 
-  private modelPath(jobType: string): string {
-    if (jobType === 'IMAGE_GEN') {
-      return 'black-forest-labs/flux-schnell';
+  private resolveModel(input: AiSubmitInput): string {
+    const settings = (input.settings || {}) as Record<string, unknown>;
+    if (typeof settings.videoModel === 'string' && settings.videoModel) {
+      return settings.videoModel;
     }
-    // Official Replicate model slugs (no version hash required)
-    return 'minimax/video-01';
+    if (typeof settings.imageModel === 'string' && input.jobType === 'IMAGE_GEN') {
+      return settings.imageModel;
+    }
+    const tierId = normalizeQualityTier(
+      (settings.qualityTier as string) || 'economy',
+    );
+    const tier =
+      DEFAULT_QUALITY_TIERS.find((t) => t.id === tierId) ||
+      DEFAULT_QUALITY_TIERS[0];
+
+    if (input.jobType === 'IMAGE_GEN') {
+      return tier.imageModel;
+    }
+    if (input.inputUrl || input.jobType === 'IMAGE_TO_VIDEO') {
+      return tier.videoModelI2v;
+    }
+    return tier.videoModelT2v;
+  }
+
+  private buildBody(model: string, input: AiSubmitInput) {
+    const prompt = input.prompt || 'cinematic video';
+    if (input.jobType === 'IMAGE_GEN') {
+      return {
+        input: {
+          prompt: input.prompt || 'beautiful illustration',
+          go_fast: model.includes('schnell'),
+          output_format: 'png',
+        },
+      };
+    }
+
+    // LTX
+    if (model.includes('ltx-video')) {
+      return {
+        input: {
+          prompt,
+          ...(input.inputUrl ? { image: input.inputUrl } : {}),
+        },
+      };
+    }
+
+    // Wan family
+    if (model.includes('wan')) {
+      return {
+        input: {
+          prompt,
+          ...(input.inputUrl ? { image: input.inputUrl } : {}),
+        },
+      };
+    }
+
+    // MiniMax / default
+    return {
+      input: {
+        prompt,
+        ...(input.inputUrl ? { first_frame_image: input.inputUrl } : {}),
+      },
+    };
   }
 
   async submit(input: AiSubmitInput): Promise<AiSubmitResult> {
     if (!this.isConfigured()) throw new Error('REPLICATE_API_TOKEN not configured');
 
-    const model = this.modelPath(input.jobType);
-    const body =
-      input.jobType === 'IMAGE_GEN'
-        ? {
-            input: {
-              prompt: input.prompt || 'beautiful illustration',
-              go_fast: true,
-              output_format: 'png',
-            },
-          }
-        : {
-            input: {
-              prompt: input.prompt || 'cinematic video',
-              ...(input.inputUrl
-                ? { first_frame_image: input.inputUrl }
-                : {}),
-            },
-          };
+    const model = this.resolveModel(input);
+    const body = this.buildBody(model, input);
+    this.logger.log(`Replicate model=${model} job=${input.jobType}`);
 
     const res = await fetch(
       `https://api.replicate.com/v1/models/${model}/predictions`,
@@ -85,6 +131,7 @@ export class ReplicateProvider implements AiProvider {
       provider: this.name,
       status: data.status === 'succeeded' ? 'completed' : 'queued',
       resultUrl: typeof url === 'string' ? url : undefined,
+      metadata: { model },
     };
   }
 

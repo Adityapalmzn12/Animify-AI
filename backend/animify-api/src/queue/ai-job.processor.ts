@@ -115,6 +115,9 @@ export class AiJobProcessor {
           ),
           characterFileIds,
           addAudio: settings.addAudio !== false,
+          qualityTier: settings.qualityTier || 'economy',
+          videoModel: settings.videoModel,
+          imageModel: settings.imageModel,
           onProgress: async (progress) => emit(progress, 'Processing'),
         });
 

@@ -4,6 +4,7 @@ import { JobType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreditsService } from '../credits/credits.service';
 import { PricingService } from '../credits/pricing.service';
+import { normalizeQualityTier } from '../credits/quality-tiers';
 import { StorageService } from '../storage/storage.service';
 import { AiProviderBus } from '../ai-providers/providers/ai-provider.bus';
 import { VideosService } from '../videos/videos.service';
@@ -37,19 +38,21 @@ export class StudioService {
       modes.map(async (mode) => ({
         mode,
         ...this.modeMeta(mode),
-        credits: await this.costFor(mode),
-        // Transparent: video modes also expose 10/30/60s rates
+        credits: await this.costFor(mode, undefined, 'economy'),
         videoCredits:
           mode === CreativeMode.PROMPT_TO_VIDEO ||
           mode === CreativeMode.STORY_REEL
             ? pricing.video
             : undefined,
+        tiers: pricing.tiers,
+        videoByTier: pricing.videoByTier,
       })),
     );
   }
 
   async create(userId: string, dto: CreateStudioDto) {
     const mode = dto.mode;
+    const qualityTier = normalizeQualityTier(dto.qualityTier || 'economy');
     // Auto-top-up for empty wallets so launch users can generate immediately
     await this.ensureLaunchCredits(userId);
 
@@ -63,10 +66,10 @@ export class StudioService {
       isScriptedVideo || willAnimate
         ? StoryPipelineService.normalizeDuration(dto.duration)
         : undefined;
-    const imageCost = await this.costFor(mode, targetDuration);
+    const imageCost = await this.costFor(mode, targetDuration, qualityTier);
     const videoBundleCost =
       isScriptedVideo || willAnimate
-        ? await this.storyCredits(targetDuration || 30)
+        ? await this.storyCredits(targetDuration || 30, qualityTier)
         : 0;
     const totalCost = isScriptedVideo
       ? videoBundleCost
@@ -172,7 +175,7 @@ export class StudioService {
   }
 
   /** Long-form scripted video: segments + required voice, billed once up front. */
-  private createScriptedVideoJob(
+  private async createScriptedVideoJob(
     userId: string,
     dto: CreateStudioDto,
     enhanced: string,
@@ -180,7 +183,12 @@ export class StudioService {
     mode: CreativeMode,
     targetDuration: 10 | 30 | 60,
   ) {
+    const qualityTier = normalizeQualityTier(dto.qualityTier || 'economy');
+    const tier = await this.pricing.getTier(qualityTier);
     const characterFileIds = [...(dto.characterImageFileIds || [])];
+    const videoModel = characterFileIds.length
+      ? tier.videoModelI2v
+      : tier.videoModelT2v;
     return this.videos.createVideoJob(userId, {
       jobType: characterFileIds.length
         ? JobType.IMAGE_TO_VIDEO
@@ -202,6 +210,10 @@ export class StudioService {
         creditsPrepaid: true,
         prepaidCredits: cost,
         hidePipelineDetails: true,
+        qualityTier,
+        videoModel,
+        imageModel: tier.imageModel,
+        engine: tier.engine,
       },
     });
   }
@@ -338,24 +350,27 @@ export class StudioService {
     return `${base} ${dto.prompt}.${brand}${colors}${extra} High quality, commercial-ready, sharp details.`.trim();
   }
 
-  private async storyCredits(durationSec: number) {
-    return this.pricing.storyCredits(durationSec);
+  private async storyCredits(durationSec: number, tier?: string) {
+    return this.pricing.storyCredits(durationSec, tier || 'economy');
   }
 
   private async costFor(
     mode: CreativeMode,
     durationSec?: number,
+    tier?: string,
   ): Promise<number> {
+    const qualityTier = tier || 'economy';
     if (mode === CreativeMode.PROMPT_TO_VIDEO || mode === CreativeMode.STORY_REEL) {
-      return this.storyCredits(durationSec || 30);
+      return this.storyCredits(durationSec || 30, qualityTier);
     }
     if (mode === CreativeMode.BRAND_KIT) {
-      return this.pricing.costFor('BRAND_KIT', 8);
+      const one = await this.pricing.imageCredits(qualityTier);
+      return one * 2;
     }
     if (mode === CreativeMode.PPT) {
-      return this.pricing.costFor('PPT', 8);
+      return this.pricing.costFor('PPT', 5);
     }
-    return this.pricing.costFor('IMAGE_GEN', 4);
+    return this.pricing.imageCredits(qualityTier);
   }
 
   private modeMeta(mode: CreativeMode) {

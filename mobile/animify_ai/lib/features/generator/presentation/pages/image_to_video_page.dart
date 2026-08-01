@@ -9,6 +9,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/app_text_field.dart';
 import '../../../../core/widgets/themed_choice_chip.dart';
+import '../../../../core/widgets/quality_tier_chips.dart';
 import '../../../../core/widgets/video_duration_chips.dart';
 import '../../../wallet/presentation/providers/pricing_provider.dart';
 
@@ -28,6 +29,7 @@ class _ImageToVideoPageState extends ConsumerState<ImageToVideoPage> {
   String _aspect = '9:16';
   String _style = 'anime';
   int _duration = 30;
+  String _qualityTier = 'economy';
   bool _isUploading = false;
   bool _isSubmitting = false;
   double _uploadProgress = 0;
@@ -107,6 +109,7 @@ class _ImageToVideoPageState extends ConsumerState<ImageToVideoPage> {
           'aspect': _aspect,
           'style': _style,
           'duration': _duration,
+          'qualityTier': _qualityTier,
           'addAudio': true,
         },
       );
@@ -198,8 +201,26 @@ class _ImageToVideoPageState extends ConsumerState<ImageToVideoPage> {
               VideoDurationChips(
                 value: _duration,
                 onChanged: (d) => setState(() => _duration = d),
-                creditsByDuration:
-                    ref.watch(creditPricingProvider).valueOrNull?.videoCredits,
+                creditsByDuration: () {
+                  final pricing =
+                      ref.watch(creditPricingProvider).valueOrNull;
+                  final match = pricing?.tiers
+                      .where((t) => t.id == _qualityTier)
+                      .toList();
+                  if (match == null || match.isEmpty) {
+                    return pricing?.videoCredits;
+                  }
+                  return match.first.videoCredits;
+                }(),
+              ),
+              const SizedBox(height: 16),
+              QualityTierChips(
+                value: _qualityTier,
+                onChanged: (t) => setState(() => _qualityTier = t),
+                tiers:
+                    ref.watch(creditPricingProvider).valueOrNull?.tiers ??
+                        const [],
+                durationSec: _duration,
               ),
               const SizedBox(height: 24),
               Text('Aspect', style: Theme.of(context).textTheme.titleSmall),

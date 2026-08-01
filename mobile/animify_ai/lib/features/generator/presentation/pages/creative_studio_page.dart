@@ -10,6 +10,7 @@ import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/app_text_field.dart';
 import '../../../../core/widgets/async_state_views.dart';
 import '../../../../core/widgets/themed_choice_chip.dart';
+import '../../../../core/widgets/quality_tier_chips.dart';
 import '../../../../core/widgets/video_duration_chips.dart';
 import '../../../wallet/presentation/providers/pricing_provider.dart';
 
@@ -37,6 +38,7 @@ class _CreativeStudioPageState extends ConsumerState<CreativeStudioPage> {
   bool _submitting = false;
   bool _animate = false;
   int _duration = 30;
+  String _qualityTier = 'economy';
   final List<String> _characterFileIds = [];
   String? _resultUrl;
   String? _error;
@@ -183,6 +185,7 @@ class _CreativeStudioPageState extends ConsumerState<CreativeStudioPage> {
           'animate': _animate,
           'aspect': isVideo ? '9:16' : '1:1',
           if (isVideo || _animate) 'duration': _duration,
+          if (isVideo || _animate) 'qualityTier': _qualityTier,
           if (isVideo || _animate) 'addAudio': true,
           if ((isVideo || _animate) && _characterFileIds.isNotEmpty)
             'characterImageFileIds': _characterFileIds,
@@ -286,10 +289,28 @@ class _CreativeStudioPageState extends ConsumerState<CreativeStudioPage> {
                   VideoDurationChips(
                     value: _duration,
                     onChanged: (d) => setState(() => _duration = d),
-                    creditsByDuration: ref
-                        .watch(creditPricingProvider)
-                        .valueOrNull
-                        ?.videoCredits,
+                    creditsByDuration: () {
+                      final pricing =
+                          ref.watch(creditPricingProvider).valueOrNull;
+                      final match = pricing?.tiers
+                          .where((t) => t.id == _qualityTier)
+                          .toList();
+                      if (match == null || match.isEmpty) {
+                        return pricing?.videoCredits;
+                      }
+                      return match.first.videoCredits;
+                    }(),
+                  ),
+                  const SizedBox(height: 12),
+                  QualityTierChips(
+                    value: _qualityTier,
+                    onChanged: (t) => setState(() => _qualityTier = t),
+                    tiers: ref
+                            .watch(creditPricingProvider)
+                            .valueOrNull
+                            ?.tiers ??
+                        const [],
+                    durationSec: _duration,
                   ),
                   const SizedBox(height: 12),
                   Text(

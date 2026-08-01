@@ -116,6 +116,9 @@ export class StoryPipelineService {
     targetDuration: number;
     characterFileIds?: string[];
     addAudio?: boolean;
+    qualityTier?: string;
+    videoModel?: string;
+    imageModel?: string;
     onProgress: (progress: number, step: string) => Promise<void>;
   }): Promise<{ buffer: Buffer; mimeType: string; fileName: string }> {
     const duration = StoryPipelineService.normalizeDuration(
@@ -148,6 +151,8 @@ export class StoryPipelineService {
             params.jobId,
             scene,
             params.style,
+            params.qualityTier,
+            params.imageModel,
           );
         }
 
@@ -156,6 +161,8 @@ export class StoryPipelineService {
           prompt: `${params.style} style. ${scene.prompt}. Smooth cinematic motion.`,
           inputUrl: firstFrame,
           durationSec: scene.durationSec,
+          qualityTier: params.qualityTier,
+          videoModel: params.videoModel,
         });
 
         const clipPath = path.join(workDir, `clip_${i}.mp4`);
@@ -296,13 +303,19 @@ export class StoryPipelineService {
     jobId: string,
     scene: StoryScene,
     style: string,
+    qualityTier?: string,
+    imageModel?: string,
   ): Promise<string | undefined> {
     try {
       const result = await this.bus.submit({
         jobId: `${jobId}_img_${scene.index}`,
         jobType: 'IMAGE_GEN',
         prompt: `${style} keyframe. ${scene.prompt}. Cinematic still, character consistent.`,
-        settings: { aspect: '9:16' },
+        settings: {
+          aspect: '9:16',
+          qualityTier: qualityTier || 'economy',
+          imageModel,
+        },
       });
       return result.resultUrl;
     } catch (error) {
@@ -318,6 +331,8 @@ export class StoryPipelineService {
     prompt: string;
     inputUrl?: string;
     durationSec: number;
+    qualityTier?: string;
+    videoModel?: string;
   }): Promise<Buffer> {
     const providers = this.videoProviders();
     if (!providers.length) {
@@ -332,7 +347,11 @@ export class StoryPipelineService {
           jobType: input.inputUrl ? 'IMAGE_TO_VIDEO' : 'TEXT_TO_VIDEO',
           prompt: input.prompt,
           inputUrl: input.inputUrl,
-          settings: { duration: input.durationSec },
+          settings: {
+            duration: input.durationSec,
+            qualityTier: input.qualityTier || 'economy',
+            videoModel: input.videoModel,
+          },
         });
 
         let resultUrl = submitted.resultUrl;

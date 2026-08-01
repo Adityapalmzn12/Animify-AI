@@ -19,15 +19,17 @@ Internal cost cut is fixed at **55%** (`BILLING_MARGIN_PERCENT=55`) when resetti
 
 ---
 
-## Video credits (customer-facing)
+## Quality tiers (cheap default + expensive optional)
 
-| Length | Key | Credits used (default) |
-|--------|-----|------------------------|
-| **10 seconds** | `STORY_10` | **25** |
-| **30 seconds** | `STORY_30` | **49** |
-| **60 seconds** | `STORY_60` | **94** |
+| Tier | Default | Models | 10s | 30s | 60s |
+|------|---------|--------|-----|-----|-----|
+| **Economy** | ✅ yes | LTX Video (cheap) | **15** | **29** | **55** |
+| **Standard** | | Wan 2.1 | **45** | **119** | **229** |
+| **Premium** | | MiniMax video-01 | **249** | **699** | **1299** |
 
-Includes scripted scenes + automatic voice. Shown on duration chips and Wallet → Credit usage guide.
+App: user picks **Quality** chips before generate.  
+Admin: **Quality & credits** page edits rates + Replicate model slugs.  
+API field: `qualityTier: "economy" | "standard" | "premium"`.
 
 ---
 

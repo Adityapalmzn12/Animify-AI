@@ -23,9 +23,11 @@ export class GeneratorController {
   estimate(
     @Query('jobType') jobType = 'TEXT_TO_VIDEO',
     @Query('duration') duration?: string,
+    @Query('qualityTier') qualityTier?: string,
   ) {
     return this.generator.estimate(jobType, {
       duration: duration ? Number(duration) : undefined,
+      qualityTier: qualityTier || 'economy',
     });
   }
 
